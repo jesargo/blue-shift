@@ -5,7 +5,16 @@ using UnityEngine.InputSystem;
 
 public class WaterTrayTrigger : MonoBehaviour
 {
+    public enum TrayLiquid
+    {
+        Water = 0,
+        AlkaliBath = 1,
+        TanninBath = 2,
+        PeroxideBath = 3
+    }
+
     public CyanotypeFluidController fluidController;
+    public TrayLiquid trayLiquid = TrayLiquid.Water;
 
     void Start()
     {
@@ -13,24 +22,37 @@ public class WaterTrayTrigger : MonoBehaviour
             fluidController = FindFirstObjectByType<CyanotypeFluidController>();
     }
 
-    // Trigger wash automatically if the paper is dragged/moved into the water tray
+    private void ApplyTraySubmersion(bool submerged)
+    {
+        if (fluidController == null) return;
+
+        if (trayLiquid == TrayLiquid.Water)
+        {
+            if (submerged)
+                fluidController.currentTool = CyanotypeFluidController.ToolMode.SubmergeTrayWash;
+            else if (fluidController.currentTool == CyanotypeFluidController.ToolMode.SubmergeTrayWash)
+                fluidController.currentTool = CyanotypeFluidController.ToolMode.None;
+        }
+        else
+        {
+            fluidController.activeBathTray = submerged
+                ? (CyanotypeFluidController.BathTrayMode)trayLiquid
+                : CyanotypeFluidController.BathTrayMode.None;
+        }
+    }
+
     void OnTriggerStay(Collider other)
     {
         if (fluidController != null && other.transform == fluidController.paperTransform)
-        {
-            fluidController.currentTool = CyanotypeFluidController.ToolMode.SubmergeTrayWash;
-        }
+            ApplyTraySubmersion(true);
     }
 
     void OnTriggerExit(Collider other)
     {
         if (fluidController != null && other.transform == fluidController.paperTransform)
-        {
-            fluidController.currentTool = CyanotypeFluidController.ToolMode.None;
-        }
+            ApplyTraySubmersion(false);
     }
 
-    // Or click the water tray directly to dunk the sheet
     void Update()
     {
         if (fluidController == null || Camera.main == null) return;
@@ -51,10 +73,11 @@ public class WaterTrayTrigger : MonoBehaviour
             Ray ray = Camera.main.ScreenPointToRay(screenPos);
             if (Physics.Raycast(ray, out RaycastHit hit, 50f) && hit.transform == transform)
             {
-                bool alreadySubmerged = fluidController.currentTool == CyanotypeFluidController.ToolMode.SubmergeTrayWash;
-                fluidController.currentTool = alreadySubmerged
-                    ? CyanotypeFluidController.ToolMode.None
-                    : CyanotypeFluidController.ToolMode.SubmergeTrayWash;
+                bool alreadyActive = trayLiquid == TrayLiquid.Water
+                    ? fluidController.currentTool == CyanotypeFluidController.ToolMode.SubmergeTrayWash
+                    : fluidController.activeBathTray == (CyanotypeFluidController.BathTrayMode)trayLiquid;
+
+                ApplyTraySubmersion(!alreadyActive);
             }
         }
     }

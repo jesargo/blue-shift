@@ -8,7 +8,7 @@ using UnityEngine.InputSystem;
 public class CyanotypeEnvironmentRig : MonoBehaviour
 {
     [Header("Target Cyanotype Sheet")]
-	[Tooltip("Fallback stencil mask texture applied if the stencil material resets.")]
+    [Tooltip("Fallback stencil mask texture applied if the stencil material resets.")]
     public Texture2D stencilTexture;
     public MeshFilter paperMeshFilter;
     public Renderer paperRenderer;
@@ -18,14 +18,16 @@ public class CyanotypeEnvironmentRig : MonoBehaviour
     public LayerMask shadowCasterLayers = ~0;
 
     [Header("Cyanotype Chemical Formulation")]
+    public CyanotypeRecipe recipe = new CyanotypeRecipe();
+
     [Tooltip("Ferric Ammonium Citrate concentration (g/100mL). Standard formula = 20.")]
     [Range(2f, 40f)] public float facConcentration = 20f;
 
     [Tooltip("Potassium Ferricyanide concentration (g/100mL). Standard formula = 8.")]
     [Range(1f, 25f)] public float kfcConcentration = 8f;
 
-    [Tooltip("Base sensitizer coating weight multiplier.")]
-    [Range(0.0f, 2.0f)] public float coatingThickness = 1.0f;
+    [Tooltip("Initial sensitizer coating weight multiplier (0 = uncoated sheet).")]
+    [Range(0.0f, 1.0f)] public float coatingThickness = 1.0f;
 
     [Header("Day/Night Sun Settings")]
     public Light sunLight;
@@ -34,37 +36,57 @@ public class CyanotypeEnvironmentRig : MonoBehaviour
     [Range(0f, 1f)] public float timeOfDay = 0.42f;
     public float peakSunUVIntensity = 0.30f;
     public float sunOrthoRadius = 3.5f;
+    [Tooltip("Solar angular penumbra radius per unit blocker height (~0.0047 rad).")]
+    public float sunPenumbra = 0.0047f;
 
     [Header("Open Window Passive UV (Works With Roof On)")]
     [Tooltip("Optional Transform placed at the open window pane. Leave null for uniform room skylight scatter.")]
     public Transform windowOpening;
     [Range(0f, 0.5f)] public float windowAmbientUV = 0.08f;
 
-    [Header("Indoor UV Lamp Settings")]
+    [Header("Indoor Arc / UV Lamp Settings")]
     public Light uvLampLight;
     public Camera lampShadowCam;
     public bool lampIsOn = true;
     public float lampUVIntensity = 2.5f;
+    [Tooltip("Effective lamp emitter diameter in world units for height-dependent soft shadows.")]
+    public float lampSize = 0.08f;
 
     [Header("Photochemical Shaders & Materials")]
     public Shader stencilDepthShader;
     public Material simMaterial;
     public Material displayMaterial;
     [Range(0.5f, 30f)] public float timeScale = 5f;
+    [Range(0.1f, 10f)] public float bathTimeScale = 1.0f;
 
     private RenderTexture _sunShadowRT;
     private RenderTexture _lampShadowRT;
     private RenderTexture _stateA;
     private RenderTexture _stateB;
+    private RenderTexture _state2A;
+    private RenderTexture _state2B;
     private Texture2D _objPosTex;
     private Texture2D _objNormTex;
     private Texture2D _sunOccTex;
     private Texture2D _lampOccTex;
 
     private const int OCC_RES = 128;
+    private const float OCC_MAX_HEIGHT = 0.42f;
+    private float _normalSign = 1f;
     private bool _washed;
     private bool _pauseCycle = true;
-
+	private RenderTexture _state3A;
+	private RenderTexture _state3B;
+	public RenderTexture State3RT => _state3A;
+    public RenderTexture State1RT => _stateA;
+    public RenderTexture State2RT => _state2A;
+	public void ResetFullSheet()
+    {
+        ClearChemicalState();
+        var fluidCtrl = FindFirstObjectByType<CyanotypeFluidController>();
+        if (fluidCtrl != null)
+            fluidCtrl.ResetFluid();
+    }
     void Start()
     {
         Physics.queriesHitBackfaces = true;
@@ -80,36 +102,48 @@ public class CyanotypeEnvironmentRig : MonoBehaviour
         if (uvLampLight != null)
             uvLampLight.shadows = LightShadows.None;
 
+        recipe.Unlock();
+        recipe.Set(facConcentration, kfcConcentration);
+
         _sunShadowRT  = CreateRT(2048, 2048, 16, RenderTextureFormat.RGFloat);
         _lampShadowRT = CreateRT(1024, 1024, 16, RenderTextureFormat.RGFloat);
         _stateA       = CreateRT(1024, 1024, 0,  RenderTextureFormat.ARGBFloat);
         _stateB       = CreateRT(1024, 1024, 0,  RenderTextureFormat.ARGBFloat);
-
+        _state2A      = CreateRT(1024, 1024, 0,  RenderTextureFormat.ARGBFloat);
+        _state2B      = CreateRT(1024, 1024, 0,  RenderTextureFormat.ARGBFloat);
+		_state3A = CreateRT(1024, 1024, 0, RenderTextureFormat.ARGBFloat);
+		_state3B = CreateRT(1024, 1024, 0, RenderTextureFormat.ARGBFloat);
         InitOcclusionMaps();
-        ClearChemicalState();
         FitStencilToA4Aspect();
+        BakeObjectSpaceGeometry();
+        ClearChemicalState();
 
         if (sunShadowCam != null) ConfigureShadowCamera(sunShadowCam, _sunShadowRT, true);
         if (lampShadowCam != null) ConfigureShadowCamera(lampShadowCam, _lampShadowRT, false);
+    }
 
-        BakeObjectSpaceGeometry();
-    }
-	private void OnValidate()
+    private void OnValidate()
     {
-        if (!Application.isPlaying && paperMeshFilter != null)
-            FitStencilToA4Aspect();
+        if (!Application.isPlaying)
+        {
+            recipe.Set(facConcentration, kfcConcentration);
+            if (paperMeshFilter != null)
+                FitStencilToA4Aspect();
+        }
     }
+
     private void InitOcclusionMaps()
     {
+        // RGFloat with mipmaps: R = transmittance, G = blocker distance above paper
         if (_sunOccTex == null)
         {
-            _sunOccTex = new Texture2D(OCC_RES, OCC_RES, TextureFormat.RFloat, false, true);
+            _sunOccTex = new Texture2D(OCC_RES, OCC_RES, TextureFormat.RGFloat, true, true);
             _sunOccTex.wrapMode = TextureWrapMode.Clamp;
             _sunOccTex.filterMode = FilterMode.Bilinear;
         }
         if (_lampOccTex == null)
         {
-            _lampOccTex = new Texture2D(OCC_RES, OCC_RES, TextureFormat.RFloat, false, true);
+            _lampOccTex = new Texture2D(OCC_RES, OCC_RES, TextureFormat.RGFloat, true, true);
             _lampOccTex.wrapMode = TextureWrapMode.Clamp;
             _lampOccTex.filterMode = FilterMode.Bilinear;
         }
@@ -127,8 +161,16 @@ public class CyanotypeEnvironmentRig : MonoBehaviour
     public void ClearChemicalState()
     {
         _washed = false;
-        ClearRT(_stateA, new Color(0f, coatingThickness, 0f, 0f));
-        ClearRT(_stateB, new Color(0f, coatingThickness, 0f, 0f));
+        recipe.Unlock();
+        recipe.Set(facConcentration, kfcConcentration);
+
+        float initCoat = Mathf.Clamp01(coatingThickness);
+        ClearRT(_stateA,  new Color(0f, initCoat, 0f, 0f));
+        ClearRT(_stateB,  new Color(0f, initCoat, 0f, 0f));
+        ClearRT(_state2A, new Color(0f, recipe.facGramsPer100mL, recipe.kfcGramsPer100mL, 0f));
+        ClearRT(_state2B, new Color(0f, recipe.facGramsPer100mL, recipe.kfcGramsPer100mL, 0f));
+		ClearRT(_state3A, Color.clear);
+		ClearRT(_state3B, Color.clear);
     }
 
     private void ClearRT(RenderTexture rt, Color clearColor)
@@ -181,6 +223,12 @@ public class CyanotypeEnvironmentRig : MonoBehaviour
         if (paperMeshFilter == null || paperRenderer == null || simMaterial == null || displayMaterial == null)
             return;
 
+        // Allow inspector slider changes only before the first brush stroke locks the recipe
+        if (!recipe.locked)
+        {
+            recipe.Set(facConcentration, kfcConcentration);
+        }
+
         HandleInput();
         UpdateSunCycle();
         RenderShadowMaps();
@@ -211,7 +259,8 @@ public class CyanotypeEnvironmentRig : MonoBehaviour
             }
 
             sinElevation = Mathf.Max(0f, -sunLight.transform.forward.y);
-            float sunUV = peakSunUVIntensity * Mathf.Pow(sinElevation, 1.8f);
+            // Atmospheric air-mass attenuation only; geometric N·L cosine is evaluated once in shader
+            float sunUV = peakSunUVIntensity * Mathf.Pow(sinElevation, 0.8f);
 
             sunLight.intensity = peakSunUVIntensity > 0.001f
                 ? Mathf.Lerp(0.15f, 1.6f, Mathf.Pow(sinElevation, 0.7f))
@@ -222,12 +271,10 @@ public class CyanotypeEnvironmentRig : MonoBehaviour
 
             simMaterial.SetFloat("_SunUVIntensity", sunUV);
             simMaterial.SetVector("_SunDir", sunLight.transform.forward);
-            displayMaterial.SetFloat("_SunUVIntensity", sunUV);
         }
         else
         {
             simMaterial.SetFloat("_SunUVIntensity", 0f);
-            displayMaterial.SetFloat("_SunUVIntensity", 0f);
         }
 
         float dayFactor = sunLight != null ? Mathf.Lerp(0.15f, 1.0f, sinElevation) : 1.0f;
@@ -267,25 +314,33 @@ public class CyanotypeEnvironmentRig : MonoBehaviour
         if (stencilDepthShader == null || sunShadowCam == null || lampShadowCam == null) return;
         if (UnityEngine.Rendering.GraphicsSettings.currentRenderPipeline != null) return;
 
-        Shader.SetGlobalVector("_LightPos", sunShadowCam.transform.position);
-        Shader.SetGlobalFloat("_NearClip", sunShadowCam.nearClipPlane);
-        Shader.SetGlobalFloat("_FarClip", sunShadowCam.farClipPlane);
-        sunShadowCam.RenderWithShader(stencilDepthShader, "");
-
-        Matrix4x4 sunVP = GL.GetGPUProjectionMatrix(sunShadowCam.projectionMatrix, false) * sunShadowCam.worldToCameraMatrix;
-        simMaterial.SetTexture("_SunShadowMap", _sunShadowRT);
-        simMaterial.SetMatrix("_SunVP", sunVP);
-
-        if (lampIsOn)
+        Shader.SetGlobalFloat("_RenderingShadowMap", 1f);
+        try
         {
-            Shader.SetGlobalVector("_LightPos", lampShadowCam.transform.position);
-            Shader.SetGlobalFloat("_NearClip", lampShadowCam.nearClipPlane);
-            Shader.SetGlobalFloat("_FarClip", lampShadowCam.farClipPlane);
-            lampShadowCam.RenderWithShader(stencilDepthShader, "");
+            Shader.SetGlobalVector("_LightPos", sunShadowCam.transform.position);
+            Shader.SetGlobalFloat("_NearClip", sunShadowCam.nearClipPlane);
+            Shader.SetGlobalFloat("_FarClip", sunShadowCam.farClipPlane);
+            sunShadowCam.RenderWithShader(stencilDepthShader, "");
 
-            Matrix4x4 lampVP = GL.GetGPUProjectionMatrix(lampShadowCam.projectionMatrix, false) * lampShadowCam.worldToCameraMatrix;
-            simMaterial.SetTexture("_LampShadowMap", _lampShadowRT);
-            simMaterial.SetMatrix("_LampVP", lampVP);
+            Matrix4x4 sunVP = GL.GetGPUProjectionMatrix(sunShadowCam.projectionMatrix, false) * sunShadowCam.worldToCameraMatrix;
+            simMaterial.SetTexture("_SunShadowMap", _sunShadowRT);
+            simMaterial.SetMatrix("_SunVP", sunVP);
+
+            if (lampIsOn)
+            {
+                Shader.SetGlobalVector("_LightPos", lampShadowCam.transform.position);
+                Shader.SetGlobalFloat("_NearClip", lampShadowCam.nearClipPlane);
+                Shader.SetGlobalFloat("_FarClip", lampShadowCam.farClipPlane);
+                lampShadowCam.RenderWithShader(stencilDepthShader, "");
+
+                Matrix4x4 lampVP = GL.GetGPUProjectionMatrix(lampShadowCam.projectionMatrix, false) * lampShadowCam.worldToCameraMatrix;
+                simMaterial.SetTexture("_LampShadowMap", _lampShadowRT);
+                simMaterial.SetMatrix("_LampVP", lampVP);
+            }
+        }
+        finally
+        {
+            Shader.SetGlobalFloat("_RenderingShadowMap", 0f);
         }
     }
 
@@ -294,27 +349,25 @@ public class CyanotypeEnvironmentRig : MonoBehaviour
         if (paperMeshFilter == null || paperMeshFilter.sharedMesh == null) return;
         if (_sunOccTex == null || _lampOccTex == null) InitOcclusionMaps();
 
-        // Temporarily disable paper collider so rays never hit the paper itself
         Collider paperCollider = paperMeshFilter.GetComponent<Collider>();
         bool wasPaperColEnabled = paperCollider != null && paperCollider.enabled;
         if (paperCollider != null) paperCollider.enabled = false;
 
         int total = OCC_RES * OCC_RES;
-        var sunCmds   = new NativeArray<RaycastCommand>(total, Allocator.TempJob);
-        var sunHits   = new NativeArray<RaycastHit>(total, Allocator.TempJob);
-        var lampCmds  = new NativeArray<RaycastCommand>(total, Allocator.TempJob);
-        var lampHits  = new NativeArray<RaycastHit>(total, Allocator.TempJob);
+        var sunCmds  = new NativeArray<RaycastCommand>(total, Allocator.TempJob);
+        var sunHits  = new NativeArray<RaycastHit>(total, Allocator.TempJob);
+        var lampCmds = new NativeArray<RaycastCommand>(total, Allocator.TempJob);
+        var lampHits = new NativeArray<RaycastHit>(total, Allocator.TempJob);
 
         Matrix4x4 l2w = paperMeshFilter.transform.localToWorldMatrix;
         Bounds b = paperMeshFilter.sharedMesh.bounds;
         bool isPlaneXZ = b.size.z > b.size.y;
 
         Vector3 localNormal = isPlaneXZ ? Vector3.up : Vector3.back;
-        Vector3 worldNormal = paperMeshFilter.transform.TransformDirection(localNormal).normalized;
-        if (Vector3.Dot(worldNormal, Vector3.up) < 0f) worldNormal = -worldNormal;
+        Vector3 worldNormal = paperMeshFilter.transform.TransformDirection(localNormal).normalized * _normalSign;
 
         Vector3 toSun = sunLight != null ? -sunLight.transform.forward.normalized : Vector3.up;
-        if (toSun.y < 0.15f) toSun = Vector3.up;
+        if (toSun.y < 0.05f) toSun = Vector3.up;
 
         bool lampIsDirectional = uvLampLight != null && uvLampLight.type == LightType.Directional;
         Vector3 lampPos = uvLampLight != null
@@ -322,8 +375,6 @@ public class CyanotypeEnvironmentRig : MonoBehaviour
             : (lampShadowCam != null ? lampShadowCam.transform.position : paperMeshFilter.transform.position + Vector3.up * 0.55f);
         Vector3 toLampDir = uvLampLight != null ? -uvLampLight.transform.forward.normalized : Vector3.up;
 
-        // Short 0.42m cast window above the paper: hits props/stencils on the table, NEVER hits the roof (Y=2.6m) or lamp shade!
-        const float castHeight = 0.42f;
         QueryParameters queryParams = new QueryParameters(shadowCasterLayers, false, QueryTriggerInteraction.Ignore, false);
 
         for (int y = 0; y < OCC_RES; y++)
@@ -340,22 +391,20 @@ public class CyanotypeEnvironmentRig : MonoBehaviour
 
                 Vector3 targetPt = l2w.MultiplyPoint3x4(localPt) + worldNormal * 0.0005f;
 
-                // 1. Sun / Skylight Ray: start 0.42m above the paper along sun vector
-                Vector3 sunOrigin = targetPt + toSun * castHeight;
-                sunCmds[idx] = new RaycastCommand(sunOrigin, -toSun, queryParams, castHeight);
+                Vector3 sunOrigin = targetPt + toSun * OCC_MAX_HEIGHT;
+                sunCmds[idx] = new RaycastCommand(sunOrigin, -toSun, queryParams, OCC_MAX_HEIGHT);
 
-                // 2. UV Lamp Ray: start 0.42m toward the lamp (below the lamp housing mesh!)
                 if (lampIsDirectional)
                 {
-                    Vector3 lampOrigin = targetPt + toLampDir * castHeight;
-                    lampCmds[idx] = new RaycastCommand(lampOrigin, -toLampDir, queryParams, castHeight);
+                    Vector3 lampOrigin = targetPt + toLampDir * OCC_MAX_HEIGHT;
+                    lampCmds[idx] = new RaycastCommand(lampOrigin, -toLampDir, queryParams, OCC_MAX_HEIGHT);
                 }
                 else
                 {
                     Vector3 toLampVec = lampPos - targetPt;
                     float fullDist = toLampVec.magnitude;
                     Vector3 dirToLamp = toLampVec / Mathf.Max(fullDist, 0.0001f);
-                    float startDist = Mathf.Min(castHeight, Mathf.Max(0.05f, fullDist - 0.12f));
+                    float startDist = Mathf.Min(OCC_MAX_HEIGHT, Mathf.Max(0.05f, fullDist - 0.12f));
                     Vector3 lampOrigin = targetPt + dirToLamp * startDist;
                     lampCmds[idx] = new RaycastCommand(lampOrigin, -dirToLamp, queryParams, startDist);
                 }
@@ -368,19 +417,20 @@ public class CyanotypeEnvironmentRig : MonoBehaviour
 
         if (paperCollider != null) paperCollider.enabled = wasPaperColEnabled;
 
-        var sunData  = _sunOccTex.GetRawTextureData<float>();
-        var lampData = _lampOccTex.GetRawTextureData<float>();
+        var sunData  = _sunOccTex.GetRawTextureData<Vector2>();
+        var lampData = _lampOccTex.GetRawTextureData<Vector2>();
 
         Collider stencilCollider = (stencilRenderer != null) ? stencilRenderer.GetComponent<Collider>() : null;
 
         for (int i = 0; i < total; i++)
         {
-            sunData[i]  = EvaluateHitTransmittance(sunHits[i].collider, stencilCollider, paperCollider);
-            lampData[i] = EvaluateHitTransmittance(lampHits[i].collider, stencilCollider, paperCollider);
+            sunData[i]  = EvaluateHitOcclusion(sunHits[i],  OCC_MAX_HEIGHT, stencilCollider, paperCollider);
+            lampData[i] = EvaluateHitOcclusion(lampHits[i], OCC_MAX_HEIGHT, stencilCollider, paperCollider);
         }
 
-        _sunOccTex.Apply(false, false);
-        _lampOccTex.Apply(false, false);
+        // Generate mipmaps (updateMipmaps = true) so diffuse skylight can sample blurred sun occlusion
+        _sunOccTex.Apply(true, false);
+        _lampOccTex.Apply(true, false);
 
         sunCmds.Dispose();
         sunHits.Dispose();
@@ -391,18 +441,21 @@ public class CyanotypeEnvironmentRig : MonoBehaviour
         simMaterial.SetTexture("_LampOccTex", _lampOccTex);
     }
 
-    private float EvaluateHitTransmittance(Collider hitCol, Collider stencilCol, Collider paperCol)
+    private Vector2 EvaluateHitOcclusion(RaycastHit hit, float rayLength, Collider stencilCol, Collider paperCol)
     {
+        Collider hitCol = hit.collider;
         if (hitCol == null || hitCol == stencilCol || hitCol == paperCol)
-            return 1.0f;
+            return new Vector2(1.0f, 0.0f);
 
+        float blockerHeight = Mathf.Max(0.0f, rayLength - hit.distance);
+        float trans = 0.0f;
         if (hitCol.TryGetComponent<UVTransmittanceProp>(out var transProp))
-            return Mathf.Clamp01(transProp.uvTransmittance);
+            trans = Mathf.Clamp01(transProp.uvTransmittance);
 
-        return 0.0f;
+        return new Vector2(trans, blockerHeight);
     }
 
-   private void StepPhotochemistry()
+    private void StepPhotochemistry()
     {
         bool isURP = UnityEngine.Rendering.GraphicsSettings.currentRenderPipeline != null;
         simMaterial.SetFloat("_UseShadowMaps", isURP ? 0f : 1f);
@@ -465,7 +518,8 @@ public class CyanotypeEnvironmentRig : MonoBehaviour
                 simMaterial.SetMatrix("_StencilWorldToLocal", stencilRenderer.transform.worldToLocalMatrix);
                 simMaterial.SetTexture("_StencilTex", mat.GetTexture("_StencilTex"));
                 simMaterial.SetFloat("_TauClear", mat.HasProperty("_TauClear") ? mat.GetFloat("_TauClear") : 0.92f);
-                simMaterial.SetFloat("_InkDensity", mat.HasProperty("_InkDensity") ? mat.GetFloat("_InkDensity") : 2.40f);
+                // Base-10 optical density default (1.05 OD10 ~= 2.40 base-e)
+                simMaterial.SetFloat("_InkDensity", mat.HasProperty("_InkDensity") ? mat.GetFloat("_InkDensity") : 1.05f);
             }
             else
             {
@@ -477,25 +531,53 @@ public class CyanotypeEnvironmentRig : MonoBehaviour
             simMaterial.SetFloat("_StencilActive", 0f);
         }
 
-        displayMaterial.SetFloat("_ConcFAC", facConcentration);
-        displayMaterial.SetFloat("_ConcKFC", kfcConcentration);
-        displayMaterial.SetFloat("_CoatingWeight", coatingThickness);
+        Vector3 s = paperMeshFilter.transform.lossyScale;
+        simMaterial.SetVector("_PaperSizeM", new Vector4(Mathf.Abs(s.x), Mathf.Abs(s.y), 0f, 0f));
+        simMaterial.SetVector("_RecipeNow", new Vector4(recipe.facGramsPer100mL, recipe.kfcGramsPer100mL, 0f, 0f));
+        simMaterial.SetFloat("_NormalSign", _normalSign);
+        simMaterial.SetFloat("_OccMaxHeight", OCC_MAX_HEIGHT);
+        simMaterial.SetFloat("_SunPenumbra", sunPenumbra);
+        simMaterial.SetFloat("_LampSize", lampSize);
 
         simMaterial.SetMatrix("_LocalToWorld", paperMeshFilter.transform.localToWorldMatrix);
         simMaterial.SetFloat("_ShadowBias", 0.0005f);
         simMaterial.SetFloat("_TimeScale", timeScale);
         simMaterial.SetFloat("_DeltaTime", Time.deltaTime);
-        simMaterial.SetFloat("_TriggerWash", _washed ? 1f : 0f);
+        simMaterial.SetFloat("_BathTimeScale", bathTimeScale);
+        simMaterial.SetFloat("_DebugQuickWash", _washed ? 1f : 0f);
 
+        // Pass 0: State 1 (UV dose, coat, bleach dose, wash)
         simMaterial.SetTexture("_PrevState", _stateA);
-        Graphics.Blit(_stateA, _stateB, simMaterial);
-        (_stateA, _stateB) = (_stateB, _stateA);
+        simMaterial.SetTexture("_PrevState2", _state2A);
+        Graphics.Blit(_stateA, _stateB, simMaterial, 0);
+
+        // Pass 1: State 2 (toned sites, baked recipe, oxidation)
+        Graphics.Blit(_state2A, _state2B, simMaterial, 1);
+
+        (_stateA, _stateB)   = (_stateB, _stateA);
+        (_state2A, _state2B) = (_state2B, _state2A);
 
         displayMaterial.SetTexture("_ChemStateTex", _stateA);
+        displayMaterial.SetTexture("_ChemStateTex2", _state2A);
         if (paperRenderer.sharedMaterial != displayMaterial)
             paperRenderer.sharedMaterial = displayMaterial;
+		simMaterial.SetTexture("_PrevState",  _stateA);
+		simMaterial.SetTexture("_PrevState2", _state2A);
+		simMaterial.SetTexture("_PrevState3", _state3A);
+
+		Graphics.Blit(_stateA,  _stateB,  simMaterial, 0);
+		Graphics.Blit(_state2A, _state2B, simMaterial, 1);
+		Graphics.Blit(_state3A, _state3B, simMaterial, 2);
+
+		(_stateA,  _stateB)  = (_stateB,  _stateA);
+		(_state2A, _state2B) = (_state2B, _state2A);
+		(_state3A, _state3B) = (_state3B, _state3A);
+
+		displayMaterial.SetTexture("_ChemStateTex",  _stateA);
+		displayMaterial.SetTexture("_ChemStateTex2", _state2A);
+		displayMaterial.SetTexture("_ChemStateTex3", _state3A);
     }
-	
+
     private void ConfigureShadowCamera(Camera cam, RenderTexture target, bool ortho)
     {
         cam.enabled = false;
@@ -516,6 +598,12 @@ public class CyanotypeEnvironmentRig : MonoBehaviour
         Vector3[] norms = mesh.normals;
         Vector2[] uvs   = mesh.uv;
         int[] tris      = mesh.triangles;
+
+        if (norms != null && norms.Length > 0)
+        {
+            Vector3 worldN = paperMeshFilter.transform.TransformDirection(norms[0]);
+            _normalSign = Vector3.Dot(worldN, Vector3.up) >= 0f ? 1f : -1f;
+        }
 
         int res = 256;
         _objPosTex  = new Texture2D(res, res, TextureFormat.RGBAFloat, false, true);
@@ -570,7 +658,7 @@ public class CyanotypeEnvironmentRig : MonoBehaviour
         simMaterial.SetTexture("_ObjPosTex", _objPosTex);
         simMaterial.SetTexture("_ObjNormTex", _objNormTex);
     }
-
+	
     private void HandleInput()
     {
         bool toggleLamp = false;
@@ -600,12 +688,12 @@ public class CyanotypeEnvironmentRig : MonoBehaviour
         if (washPrint)
         {
             _washed = true;
-            Debug.Log("[Cyanotype] Water wash triggered! Print fixed in Prussian blue.");
+            Debug.Log("[Cyanotype] Debug quick-wash triggered.");
         }
         if (resetPaper)
         {
-            ClearChemicalState();
-            Debug.Log("[Cyanotype] Fresh sensitized paper loaded.");
+            ResetFullSheet();
+            Debug.Log("[Cyanotype] Fresh paper loaded, recipe unlocked, and fluid/bath buffers cleared.");
         }
     }
 }

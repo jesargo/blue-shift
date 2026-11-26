@@ -8,7 +8,7 @@ Shader "Cyanotype/FluidTransport"
         _BrushRadius ("Brush Radius", Float) = 0.06
         _BrushStrength ("Brush Strength", Float) = 3.5
         _BrushMode ("0=None, 1=Coat Sensitizer, 2=Pour Water Wash, 3=Submerge Tray", Float) = 0.0
-        _ApplicatorShape ("0=Hake Brush, 1=Foam Roller", Float) = 0.0
+        _ApplicatorShape ("0=Hake Brush, 1=Glass Coating Rod", Float) = 0.0
         _DeltaTime ("Delta Time", Float) = 0.016
     }
     SubShader
@@ -69,16 +69,16 @@ Shader "Cyanotype/FluidTransport"
             float sdSegment(float2 p, float2 a, float2 b)
             {
                 float2 pa = p - a, ba = b - a;
-                float h = clamp(dot(pa, ba) / max(dot(ba, ba), 1e-6), 0.0, 1.0);
+                float  h  = clamp(dot(pa, ba) / max(dot(ba, ba), 1e-6), 0.0, 1.0);
                 return length(pa - ba * h);
             }
 
             float4 frag(v2f_img i) : SV_Target
             {
-                float dt = clamp(_DeltaTime, 0.001, 0.033);
+                float  dt    = clamp(_DeltaTime, 0.001, 0.033);
                 float2 texel = _PrevFluid_TexelSize.xy;
 
-                float fiberMap = fbm(i.uv * float2(26.0, 38.0));
+                float fiberMap  = fbm(i.uv * float2(26.0, 38.0));
                 float fineGrain = hash21(i.uv * 512.0);
                 float fiberPerm = 0.45 + 1.15 * fiberMap;
 
@@ -88,14 +88,14 @@ Shader "Cyanotype/FluidTransport"
                 float4 e = tex2D(_PrevFluid, i.uv + float2(texel.x, 0.0));
                 float4 w = tex2D(_PrevFluid, i.uv - float2(texel.x, 0.0));
 
-                // 1. Shallow-water velocity field (only moves where standing water exists)
-                float2 gradH = float2(e.r - w.r, n.r - s.r) * 0.5;
-                float swirlAngle = (fiberMap - 0.5) * 6.2831 + _Time.y * 0.6;
-                float2 swirl = float2(cos(swirlAngle), sin(swirlAngle)) * 0.0014 * smoothstep(0.15, 0.8, c.r);
-                float2 vel = (-gradH * 0.024 + swirl) * fiberPerm;
+                // 1. Shallow-water velocity field
+                float2 gradH      = float2(e.r - w.r, n.r - s.r) * 0.5;
+                float  swirlAngle = (fiberMap - 0.5) * 6.2831 + _Time.y * 0.6;
+                float2 swirl      = float2(cos(swirlAngle), sin(swirlAngle)) * 0.0014 * smoothstep(0.15, 0.8, c.r);
+                float2 vel        = (-gradH * 0.024 + swirl) * fiberPerm;
 
                 float2 backUV = clamp(i.uv - vel * dt * 50.0, 0.0, 1.0);
-                float4 adv = tex2D(_PrevFluid, backUV);
+                float4 adv    = tex2D(_PrevFluid, backUV);
 
                 float hWater = lerp(c.r, adv.r, 0.55);
                 float sat    = c.g;
@@ -103,8 +103,7 @@ Shader "Cyanotype/FluidTransport"
                 float wash   = max(c.a, adv.a * 0.998);
 
                 // 2. Finite-volume water spread + evaporation/dry-fiber absorption
-                // Dry cotton fibers absorb thin films, halting spread unless you keep pouring!
-                float lapWater = (n.r + s.r + e.r + w.r - 4.0 * hWater);
+                float lapWater      = (n.r + s.r + e.r + w.r - 4.0 * hWater);
                 float dryResistance = lerp(0.32, 0.06, sat);
                 hWater = max(0.0, hWater + lapWater * 0.14 * fiberPerm - dryResistance * dt);
 
@@ -120,18 +119,17 @@ Shader "Cyanotype/FluidTransport"
                 hWater -= absorb;
                 sat = saturate(sat + absorb - 0.05 * dt);
 
-                // 3. Moisture-Gated Wash Front: ONLY spreads where hWater > 0.26 (drenched)
+                // 3. Moisture-Gated Wash Front: spreads where hWater > 0.24
                 float maxNeighborWash = max(max(n.a, s.a), max(e.a, w.a));
                 float avgNeighborWash = 0.25 * (n.a + s.a + e.a + w.a);
-                float wetnessGate = smoothstep(0.24, 0.65, hWater);
+                float wetnessGate     = smoothstep(0.24, 0.65, hWater);
 
                 if (wetnessGate > 0.01)
                 {
-                    float creep = saturate((2.8 + 4.2 * fiberMap) * wetnessGate * dt);
+                    float creep      = saturate((2.8 + 4.2 * fiberMap) * wetnessGate * dt);
                     float targetWash = lerp(avgNeighborWash, maxNeighborWash, 0.55);
                     wash = max(wash, lerp(wash, targetWash, creep));
 
-                    // Dissolve yellow sensitizer proportional to active standing water
                     float dissolveRate = wash * wetnessGate * (0.75 + 0.55 * fiberMap) * dt;
                     sens = max(0.0, sens - dissolveRate);
                 }
@@ -150,11 +148,11 @@ Shader "Cyanotype/FluidTransport"
                         hWater = min(1.35, hWater + 1.4 * dt * fiberPerm);
                         wash   = max(wash, lerp(wash, maxNeighborWash, saturate(9.0 * dt * fiberPerm)));
                     }
-                    sat = saturate(sat + 2.0 * dt);
+                    sat  = saturate(sat + 2.0 * dt);
                     sens = max(0.0, sens - wash * (0.95 + 0.45 * fiberMap) * dt);
                 }
 
-                // 5. Interactive Brush (0), Foam Roller (1), or Water Pour (2)
+                // 5. Interactive Hake Brush (0), Glass Coating Rod (1), or Water Pour (2)
                 if (_BrushMode > 0.5 && _BrushMode < 2.5 && _BrushPos.x >= 0.0)
                 {
                     float dist = sdSegment(i.uv, _PrevBrushPos, _BrushPos);
@@ -167,31 +165,31 @@ Shader "Cyanotype/FluidTransport"
                     }
                     else
                     {
-                        float2 deltaUV = i.uv - _BrushPos;
+                        // 1900s Glass Coating Rod meniscus bead profile
+                        float2 deltaUV   = i.uv - _BrushPos;
                         float2 strokeDir = _BrushPos - _PrevBrushPos;
-                        float len = length(strokeDir);
-                        float2 tangent = (len > 1e-4) ? (strokeDir / len) : float2(0.0, 1.0);
-                        float2 normal  = float2(-tangent.y, tangent.x);
+                        float  len       = length(strokeDir);
+                        float2 tangent   = (len > 1e-4) ? (strokeDir / len) : float2(0.0, 1.0);
+                        float2 normal    = float2(-tangent.y, tangent.x);
 
-                        float alongRoller  = abs(dot(deltaUV, normal));
-                        float acrossRoller = sdSegment(i.uv, _PrevBrushPos, _BrushPos);
-                        float widthMask = smoothstep(_BrushRadius * 2.4, _BrushRadius * 1.9, alongRoller);
-                        float rollMask  = smoothstep(_BrushRadius * 0.65, _BrushRadius * 0.15, acrossRoller);
+                        float alongRod  = abs(dot(deltaUV, normal));
+                        float acrossRod = sdSegment(i.uv, _PrevBrushPos, _BrushPos);
+                        float widthMask = smoothstep(_BrushRadius * 2.4, _BrushRadius * 1.9, alongRod);
+                        float rollMask  = smoothstep(_BrushRadius * 0.65, _BrushRadius * 0.15, acrossRod);
                         mask = widthMask * rollMask * (0.94 + 0.06 * fineGrain);
                     }
 
                     if (abs(_BrushMode - 1.0) < 0.2)
                     {
                         float deposit = mask * _BrushStrength * dt * 6.5;
-                        // Coating deposits sensitizer without flooding the sheet with wash water
+                        // Coating saturates cleanly at 1.0 (one full coat; eliminates double-counting)
                         hWater = min(0.22, hWater + deposit * 0.12);
                         sat    = min(1.0, sat + deposit * 0.6);
-                        sens   = min(1.35, sens + deposit);
+                        sens   = min(1.0, sens + deposit);
                         wash   = max(0.0, wash - deposit * 0.9);
                     }
                     else if (abs(_BrushMode - 2.0) < 0.2)
                     {
-                        // Pouring water builds standing water locally; hold longer to drench and spread further
                         float waterIn = mask * _BrushStrength * dt * 4.8;
                         hWater = min(1.5, hWater + waterIn);
                         sat    = saturate(sat + waterIn * 0.8);

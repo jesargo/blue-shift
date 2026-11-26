@@ -20,21 +20,21 @@ public class CyanotypeStudioBuilder : EditorWindow
 
         Shader litShader = Shader.Find("Universal Render Pipeline/Lit") ?? Shader.Find("Standard");
 
-        Material floorMat      = CreateLitMat(litShader, new Color(0.24f, 0.25f, 0.28f), 0.0f, 0.25f);
-        Material wallMat       = CreateLitMat(litShader, new Color(0.76f, 0.74f, 0.70f), 0.0f, 0.15f);
-        Material woodTableMat  = CreateLitMat(litShader, new Color(0.38f, 0.26f, 0.17f), 0.0f, 0.35f);
-        Material patioStoneMat = CreateLitMat(litShader, new Color(0.68f, 0.66f, 0.62f), 0.0f, 0.20f);
-        Material metalDarkMat  = CreateLitMat(litShader, new Color(0.16f, 0.17f, 0.20f), 0.85f, 0.65f);
-        Material trayCeramicMat= CreateLitMat(litShader, new Color(0.88f, 0.90f, 0.92f), 0.0f, 0.75f);
-        Material waterMat      = CreateTransparentMat(litShader, new Color(0.25f, 0.62f, 0.85f, 0.38f));
-        Material uvGlowMat     = CreateEmissiveMat(litShader, new Color(0.45f, 0.22f, 0.95f), new Color(0.55f, 0.25f, 1.0f) * 2.4f);
+        Material floorMat       = CreateLitMat(litShader, new Color(0.24f, 0.25f, 0.28f), 0.0f, 0.25f);
+        Material wallMat        = CreateLitMat(litShader, new Color(0.76f, 0.74f, 0.70f), 0.0f, 0.15f);
+        Material woodTableMat   = CreateLitMat(litShader, new Color(0.38f, 0.26f, 0.17f), 0.0f, 0.35f);
+        Material patioStoneMat  = CreateLitMat(litShader, new Color(0.68f, 0.66f, 0.62f), 0.0f, 0.20f);
+        Material metalDarkMat   = CreateLitMat(litShader, new Color(0.16f, 0.17f, 0.20f), 0.85f, 0.65f);
+        Material trayCeramicMat = CreateLitMat(litShader, new Color(0.88f, 0.90f, 0.92f), 0.0f, 0.75f);
+        Material waterMat       = CreateTransparentMat(litShader, new Color(0.25f, 0.62f, 0.85f, 0.38f));
+        Material uvGlowMat      = CreateEmissiveMat(litShader, new Color(0.45f, 0.22f, 0.95f), new Color(0.55f, 0.25f, 1.0f) * 2.4f);
 
         GameObject roomGroup = CreateChild(studioRoot, "Darkroom_Architecture");
 
         CreateBox(roomGroup, "StudioFloor", new Vector3(1.8f, -0.05f, -1.5f), new Vector3(9.5f, 0.10f, 6.5f), floorMat, true);
-        CreateBox(roomGroup, "Wall_Back",  new Vector3(-0.2f, 1.35f,  1.2f), new Vector3(4.2f, 2.7f, 0.15f), wallMat, true);
-        CreateBox(roomGroup, "Wall_Left",  new Vector3(-2.2f, 1.35f, -1.5f), new Vector3(0.15f, 2.7f, 5.5f), wallMat, true);
-        CreateBox(roomGroup, "Wall_Front", new Vector3(-0.2f, 1.35f, -4.2f), new Vector3(4.2f, 2.7f, 0.15f), wallMat, true);
+        CreateBox(roomGroup, "Wall_Back",   new Vector3(-0.2f, 1.35f,  1.2f), new Vector3(4.2f, 2.7f, 0.15f), wallMat, true);
+        CreateBox(roomGroup, "Wall_Left",   new Vector3(-2.2f, 1.35f, -1.5f), new Vector3(0.15f, 2.7f, 5.5f), wallMat, true);
+        CreateBox(roomGroup, "Wall_Front",  new Vector3(-0.2f, 1.35f, -4.2f), new Vector3(4.2f, 2.7f, 0.15f), wallMat, true);
 
         GameObject ceiling = CreateBox(roomGroup, "StudioCeiling", new Vector3(-0.2f, 2.72f, -1.5f), new Vector3(4.3f, 0.12f, 5.6f), wallMat, true);
 
@@ -63,10 +63,12 @@ public class CyanotypeStudioBuilder : EditorWindow
         Shader simShader     = Shader.Find("Cyanotype/PhotochemicalSimMultiSource");
         Shader displayShader = Shader.Find("Cyanotype/SurfaceDisplay");
         Shader fluidShader   = Shader.Find("Cyanotype/FluidTransport");
+        Shader bathShader    = Shader.Find("Cyanotype/BathTransport");
 
         Material simMat     = CreateAssetMaterial(simShader,     "Assets/Cyanotype/Materials/M_CyanotypeSim.mat");
         Material displayMat = CreateAssetMaterial(displayShader, "Assets/Cyanotype/Materials/M_CyanotypeDisplay.mat");
         Material fluidMat   = CreateAssetMaterial(fluidShader,   "Assets/Cyanotype/Materials/M_CyanotypeFluid.mat");
+        Material bathMat    = CreateAssetMaterial(bathShader,    "Assets/Cyanotype/Materials/M_CyanotypeBath.mat");
 
         if (displayMat != null)
             paperMR.sharedMaterial = displayMat;
@@ -85,7 +87,8 @@ public class CyanotypeStudioBuilder : EditorWindow
         waterVol.layer = 2;
         BoxCollider waterCol = waterVol.GetComponent<BoxCollider>();
         waterCol.isTrigger = true;
-        waterVol.AddComponent<WaterTrayTrigger>();
+        var waterTrigger = waterVol.AddComponent<WaterTrayTrigger>();
+        waterTrigger.trayLiquid = WaterTrayTrigger.TrayLiquid.Water;
 
         GameObject propTrayGO = CreateChild(studioRoot, "PropTray");
         propTrayGO.transform.position = new Vector3(-0.78f, 0.801f, -1.5f);
@@ -102,16 +105,16 @@ public class CyanotypeStudioBuilder : EditorWindow
         propTray.paperSurface = paperGO.transform;
         propTray.propLayer = 1 << 0;
 
-        GameObject lampRoot = CreateChild(studioRoot, "UVLamp_Assembly");
+        GameObject lampRoot = CreateChild(studioRoot, "CarbonArcLamp_Assembly");
         lampRoot.transform.position = new Vector3(0.0f, 1.58f, -1.5f);
         lampRoot.layer = 2;
 
         CreateBox(lampRoot, "Lamp_StandPole", new Vector3(0.0f, 1.25f, -1.02f), new Vector3(0.04f, 0.92f, 0.04f), metalDarkMat, false).layer = 2;
         CreateBox(lampRoot, "Lamp_Arm",       new Vector3(0.0f, 1.70f, -1.26f), new Vector3(0.04f, 0.04f, 0.52f), metalDarkMat, false).layer = 2;
         CreateBox(lampRoot, "Lamp_Hood",      new Vector3(0.0f, 1.64f, -1.50f), new Vector3(0.46f, 0.06f, 0.56f), metalDarkMat, false).layer = 2;
-        CreateBox(lampRoot, "Lamp_UVTube",    new Vector3(0.0f, 1.60f, -1.50f), new Vector3(0.38f, 0.02f, 0.48f), uvGlowMat, false).layer = 2;
+        CreateBox(lampRoot, "Lamp_ArcTube",   new Vector3(0.0f, 1.60f, -1.50f), new Vector3(0.38f, 0.02f, 0.48f), uvGlowMat, false).layer = 2;
 
-        GameObject uvLightGO = new GameObject("UV_SpotLight");
+        GameObject uvLightGO = new GameObject("Arc_SpotLight");
         uvLightGO.transform.SetParent(lampRoot.transform, false);
         uvLightGO.transform.position = new Vector3(0.0f, 1.56f, -1.50f);
         uvLightGO.transform.rotation = Quaternion.Euler(90f, 0f, 0f);
@@ -121,7 +124,7 @@ public class CyanotypeStudioBuilder : EditorWindow
         uvSpot.range = 4.0f;
         uvSpot.intensity = 3.2f;
         uvSpot.color = new Color(0.55f, 0.30f, 1.0f);
-        uvSpot.shadows = LightShadows.Soft;
+        uvSpot.shadows = LightShadows.None;
 
         Light sunLight = FindFirstObjectByType<Light>();
         if (sunLight == null || sunLight.type != LightType.Directional)
@@ -146,22 +149,23 @@ public class CyanotypeStudioBuilder : EditorWindow
         envRig.uvLampLight = uvSpot;
         envRig.lampIsOn = true;
         envRig.lampUVIntensity = 2.6f;
+        envRig.lampSize = 0.08f;
+        envRig.sunPenumbra = 0.0047f;
         envRig.peakSunUVIntensity = 0.0f;
         envRig.windowAmbientUV = 0.03f;
         envRig.coatingThickness = 0.0f;
         envRig.simMaterial = simMat;
         envRig.displayMaterial = displayMat;
         envRig.timeScale = 5.0f;
+        envRig.bathTimeScale = 1.0f;
 
         CyanotypeFluidController fluidCtrl = rigGO.AddComponent<CyanotypeFluidController>();
         fluidCtrl.rig = envRig;
         fluidCtrl.currentTool = CyanotypeFluidController.ToolMode.SensitizerBrush;
-        TryAssignSerializedProperty(fluidCtrl, "paperMeshFilter", paperMF);
-        TryAssignSerializedProperty(fluidCtrl, "paperTransform", paperGO.transform);
-        TryAssignSerializedProperty(fluidCtrl, "fluidSimMaterial", fluidMat);
-        TryAssignSerializedProperty(fluidCtrl, "fluidMaterial", fluidMat);
-        TryAssignSerializedProperty(fluidCtrl, "displayMaterial", displayMat);
-        TryAssignSerializedProperty(fluidCtrl, "simMaterial", simMat);
+        fluidCtrl.paperTransform = paperGO.transform;
+        fluidCtrl.fluidMaterial = fluidMat;
+        fluidCtrl.bathMaterial = bathMat;
+        waterTrigger.fluidController = fluidCtrl;
 
         CyanotypeApplicatorTools appTools = rigGO.AddComponent<CyanotypeApplicatorTools>();
         appTools.fluidController = fluidCtrl;
@@ -169,10 +173,7 @@ public class CyanotypeStudioBuilder : EditorWindow
 
         StudioEnvironmentToggle envToggle = rigGO.AddComponent<StudioEnvironmentToggle>();
         envToggle.rig = envRig;
-        TryAssignSerializedProperty(envToggle, "ceilingObject", ceiling);
-        TryAssignSerializedProperty(envToggle, "studioCeiling", ceiling);
-        TryAssignSerializedProperty(envToggle, "ceiling", ceiling);
-        TryAssignSerializedProperty(envToggle, "sunLight", sunLight);
+        envToggle.studioCeiling = ceiling;
 
         DraggableCyanotypePaper dragPaper = paperGO.AddComponent<DraggableCyanotypePaper>();
         dragPaper.fluidController = fluidCtrl;
@@ -200,19 +201,7 @@ public class CyanotypeStudioBuilder : EditorWindow
             mainCam.gameObject.AddComponent<CyanotypePlayerController>();
 
         Selection.activeGameObject = rigGO;
-        Debug.Log("[Cyanotype] Complete Studio built! Coat paper [1]/[4], place props [0], expose with UV Lamp [L] or Open Roof [T], and wash in Water Tray [3].");
-    }
-
-    private static void TryAssignSerializedProperty(Object target, string propertyName, Object value)
-    {
-        if (target == null || value == null) return;
-        SerializedObject so = new SerializedObject(target);
-        SerializedProperty prop = so.FindProperty(propertyName);
-        if (prop != null && prop.propertyType == SerializedPropertyType.ObjectReference)
-        {
-            prop.objectReferenceValue = value;
-            so.ApplyModifiedPropertiesWithoutUndo();
-        }
+        Debug.Log("[Cyanotype] Complete Studio built! Tools [0-6], Arc Lamp [L], Open Roof [T], Water Tray [3], Peroxide Spray+Brush [6].");
     }
 
     [MenuItem("Tools/Cyanotype/Make Selected Object a Stencil")]

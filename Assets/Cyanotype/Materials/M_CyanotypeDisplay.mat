@@ -23,7 +23,19 @@ Material:
   m_SavedProperties:
     serializedVersion: 3
     m_TexEnvs:
+    - _BathTex:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
     - _ChemStateTex:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _ChemStateTex2:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _ChemStateTex3:
         m_Texture: {fileID: 0}
         m_Scale: {x: 1, y: 1}
         m_Offset: {x: 0, y: 0}
@@ -35,10 +47,12 @@ Material:
     m_Floats:
     - _CoatingWeight: 2
     - _ConcFAC: 20
-    - _ConcKFC: 16
+    - _ConcKFC: 8
     - _PeroxideBoost: 0
+    - _Roughness: 0.86
     - _SunUVIntensity: 0
     - _TanninTone: 0
-    m_Colors: []
+    m_Colors:
+    - _PaperColor: {r: 0.96, g: 0.94, b: 0.89, a: 1}
   m_BuildTextureStacks: []
   m_AllowLocking: 1

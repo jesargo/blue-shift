@@ -37,7 +37,7 @@ Material:
     - _BrushMode: 0
     - _BrushRadius: 0.06
     - _BrushStrength: 1.2
-    - _DeltaTime: 0.029153196
+    - _DeltaTime: 0.027552601
     m_Colors:
     - _BrushPos: {r: -1, g: -1, b: 0, a: 0}
     - _PrevBrushPos: {r: -1, g: -1, b: 0, a: 0}

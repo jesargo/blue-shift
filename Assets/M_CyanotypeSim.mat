@@ -8,7 +8,7 @@ Material:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_Name: M_CyanotypeSim
-  m_Shader: {fileID: 4800000, guid: 5b118c5d5e91e504ca4791727d21af49, type: 3}
+  m_Shader: {fileID: 4800000, guid: 4621dbd43a5ddab41b3faa542c8b9ebd, type: 3}
   m_Parent: {fileID: 0}
   m_ModifiedSerializedProperties: 0
   m_ValidKeywords: []
@@ -23,6 +23,10 @@ Material:
   m_SavedProperties:
     serializedVersion: 3
     m_TexEnvs:
+    - _BathTex:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
     - _FluidTex:
         m_Texture: {fileID: 0}
         m_Scale: {x: 1, y: 1}
@@ -44,6 +48,14 @@ Material:
         m_Scale: {x: 1, y: 1}
         m_Offset: {x: 0, y: 0}
     - _PrevState:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _PrevState2:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _PrevState3:
         m_Texture: {fileID: 0}
         m_Scale: {x: 1, y: 1}
         m_Offset: {x: 0, y: 0}
@@ -71,11 +83,11 @@ Material:
     m_Floats:
     - _BleachIntensity: 0
     - _CoatingThickness: 0
-    - _DeltaTime: 0.029153196
+    - _DeltaTime: 0.027552601
     - _LampIrradiance: 0
     - _LampRadiusUV: 0.45
     - _StencilInvert: 0
-    - _StencilOpacity: 1
+    - _StencilOpacity: 0
     - _SunIrradiance: 0
     - _TimeScale: 5
     - _TriggerWash: 0

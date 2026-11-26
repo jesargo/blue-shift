@@ -22,7 +22,6 @@ public class DraggableShadowProp : MonoBehaviour
 
     private static DraggableShadowProp _selectedProp;
     private static int _lastClickFrame = -1;
-    private static int _lastCursorToggleFrame = -1;
     private static DraggableShadowProp _clickedPropThisFrame;
 
     public static DraggableShadowProp SelectedProp => _selectedProp;
@@ -31,16 +30,13 @@ public class DraggableShadowProp : MonoBehaviour
     {
         _cam = FindActiveCamera();
         if (matchInitialHeight)
-        {
             tableY = transform.position.y;
-        }
 
         EnsureSolidShadowColliders();
     }
 
     private void EnsureSolidShadowColliders()
     {
-        // Check if this prop already has at least one non-trigger collider for UV raycasts
         Collider[] existing = GetComponentsInChildren<Collider>(true);
         for (int i = 0; i < existing.Length; i++)
         {
@@ -48,7 +44,6 @@ public class DraggableShadowProp : MonoBehaviour
                 return;
         }
 
-        // Otherwise, add solid MeshColliders (or BoxColliders) to child meshes so UV rays hit them
         MeshFilter[] meshes = GetComponentsInChildren<MeshFilter>(true);
         for (int i = 0; i < meshes.Length; i++)
         {
@@ -70,37 +65,13 @@ public class DraggableShadowProp : MonoBehaviour
     {
         if (_cam == null || !_cam.isActiveAndEnabled)
             _cam = FindActiveCamera();
-
         if (_cam == null) return;
 
-        HandleCursorToggle();
         HandlePointerInput();
 
-        if (_selectedProp == this)
+        if (_selectedProp == this && !IsRightMouseHeld())
         {
             HandleKeyboardAdjustment();
-        }
-    }
-
-    private static void HandleCursorToggle()
-    {
-        if (_lastCursorToggleFrame == Time.frameCount) return;
-
-        bool togglePressed = false;
-#if ENABLE_INPUT_SYSTEM
-        if (Keyboard.current != null && Keyboard.current.tabKey.wasPressedThisFrame)
-            togglePressed = true;
-#else
-        if (Input.GetKeyDown(KeyCode.Tab))
-            togglePressed = true;
-#endif
-
-        if (togglePressed)
-        {
-            _lastCursorToggleFrame = Time.frameCount;
-            bool lockIt = Cursor.lockState != CursorLockMode.Locked;
-            Cursor.lockState = lockIt ? CursorLockMode.Locked : CursorLockMode.None;
-            Cursor.visible = !lockIt;
         }
     }
 
@@ -119,9 +90,12 @@ public class DraggableShadowProp : MonoBehaviour
 
     private void HandlePointerInput()
     {
+        if (CyanotypeStudioHUD.IsPointerOverHUD && !_dragging)
+            return;
+
         bool pointerDown = WasPointerPressedThisFrame();
         bool pointerHeld = IsPointerHeld();
-        bool pointerUp = WasPointerReleasedThisFrame();
+        bool pointerUp   = WasPointerReleasedThisFrame();
         Vector2 screenPos = GetPointerScreenPosition();
 
         if (pointerDown)
@@ -166,9 +140,10 @@ public class DraggableShadowProp : MonoBehaviour
 
     private void HandleKeyboardAdjustment()
     {
+        // Q / E: Lower / Raise selected prop (never collides with WASD)
         float hDelta = 0f;
-        if (IsRaiseKeyHeld(true)) hDelta += 0.6f * Time.deltaTime;   // E
-        if (IsRaiseKeyHeld(false)) hDelta -= 0.6f * Time.deltaTime;  // Q
+        if (IsRaiseKeyHeld(true))  hDelta += 0.6f * Time.deltaTime;
+        if (IsRaiseKeyHeld(false)) hDelta -= 0.6f * Time.deltaTime;
 
         if (Mathf.Abs(hDelta) > 0f)
         {
@@ -177,9 +152,10 @@ public class DraggableShadowProp : MonoBehaviour
             transform.position = p;
         }
 
+        // Z / X (or [ / ]): Rotate selected prop (frees A / D for camera movement)
         float rDelta = 0f;
-        if (IsRotateKeyHeld(true)) rDelta += 75f * Time.deltaTime;   // D
-        if (IsRotateKeyHeld(false)) rDelta -= 75f * Time.deltaTime;  // A
+        if (IsRotateKeyHeld(true))  rDelta += 75f * Time.deltaTime;
+        if (IsRotateKeyHeld(false)) rDelta -= 75f * Time.deltaTime;
 
         if (Mathf.Abs(rDelta) > 0f)
         {
@@ -215,11 +191,8 @@ public class DraggableShadowProp : MonoBehaviour
     {
         if (Cursor.lockState == CursorLockMode.Locked)
             return new Vector2(Screen.width * 0.5f, Screen.height * 0.5f);
-
 #if ENABLE_INPUT_SYSTEM
-        if (Mouse.current != null)
-            return Mouse.current.position.ReadValue();
-        return Vector2.zero;
+        return Mouse.current != null ? Mouse.current.position.ReadValue() : Vector2.zero;
 #else
         return Input.mousePosition;
 #endif
@@ -240,6 +213,15 @@ public class DraggableShadowProp : MonoBehaviour
         return Mouse.current != null && Mouse.current.leftButton.isPressed;
 #else
         return Input.GetMouseButton(0);
+#endif
+    }
+
+    private static bool IsRightMouseHeld()
+    {
+#if ENABLE_INPUT_SYSTEM
+        return Mouse.current != null && Mouse.current.rightButton.isPressed;
+#else
+        return Input.GetMouseButton(1);
 #endif
     }
 
@@ -266,9 +248,11 @@ public class DraggableShadowProp : MonoBehaviour
     {
 #if ENABLE_INPUT_SYSTEM
         if (Keyboard.current == null) return false;
-        return rightKey ? Keyboard.current.dKey.isPressed : Keyboard.current.aKey.isPressed;
+        return rightKey
+            ? (Keyboard.current.xKey.isPressed || Keyboard.current.rightBracketKey.isPressed)
+            : (Keyboard.current.zKey.isPressed || Keyboard.current.leftBracketKey.isPressed);
 #else
-        return Input.GetKey(rightKey ? KeyCode.D : KeyCode.A);
+        return Input.GetKey(rightKey ? KeyCode.X : KeyCode.Z) || Input.GetKey(rightKey ? KeyCode.RightBracket : KeyCode.LeftBracket);
 #endif
     }
 }
