@@ -8,6 +8,8 @@ using UnityEngine.InputSystem;
 public class CyanotypeEnvironmentRig : MonoBehaviour
 {
     [Header("Target Cyanotype Sheet")]
+	[Tooltip("Fallback stencil mask texture applied if the stencil material resets.")]
+    public Texture2D stencilTexture;
     public MeshFilter paperMeshFilter;
     public Renderer paperRenderer;
     public Renderer stencilRenderer;
@@ -92,7 +94,11 @@ public class CyanotypeEnvironmentRig : MonoBehaviour
 
         BakeObjectSpaceGeometry();
     }
-
+	private void OnValidate()
+    {
+        if (!Application.isPlaying && paperMeshFilter != null)
+            FitStencilToA4Aspect();
+    }
     private void InitOcclusionMaps()
     {
         if (_sunOccTex == null)
@@ -139,12 +145,16 @@ public class CyanotypeEnvironmentRig : MonoBehaviour
         if (paperMeshFilter == null) return;
 
         float aspect = 0.707f;
-        if (stencilRenderer != null && stencilRenderer.sharedMaterial != null)
+        Texture tex = stencilTexture;
+
+        if (tex == null && stencilRenderer != null && stencilRenderer.sharedMaterial != null
+            && stencilRenderer.sharedMaterial.HasProperty("_StencilTex"))
         {
-            Texture tex = stencilRenderer.sharedMaterial.GetTexture("_StencilTex");
-            if (tex != null && tex.width > 16 && tex.height > 16)
-                aspect = Mathf.Clamp((float)tex.width / tex.height, 0.3f, 3.0f);
+            tex = stencilRenderer.sharedMaterial.GetTexture("_StencilTex");
         }
+
+        if (tex != null && tex.width > 16 && tex.height > 16)
+            aspect = Mathf.Clamp((float)tex.width / tex.height, 0.3f, 3.0f);
 
         float height = 0.89f;
         Vector3 a4Scale = new Vector3(height * aspect, height, 1f);
@@ -161,11 +171,8 @@ public class CyanotypeEnvironmentRig : MonoBehaviour
         {
             stencilRenderer.transform.localScale = a4Scale;
             Vector3 stencilPos = stencilRenderer.transform.position;
-            if (stencilPos.y < paperPos.y + 0.002f)
-            {
-                stencilPos.y = paperPos.y + 0.003f;
-                stencilRenderer.transform.position = stencilPos;
-            }
+            stencilPos.y = paperPos.y + 0.008f;
+            stencilRenderer.transform.position = stencilPos;
         }
     }
 
@@ -395,7 +402,7 @@ public class CyanotypeEnvironmentRig : MonoBehaviour
         return 0.0f;
     }
 
-    private void StepPhotochemistry()
+   private void StepPhotochemistry()
     {
         bool isURP = UnityEngine.Rendering.GraphicsSettings.currentRenderPipeline != null;
         simMaterial.SetFloat("_UseShadowMaps", isURP ? 0f : 1f);
@@ -437,11 +444,33 @@ public class CyanotypeEnvironmentRig : MonoBehaviour
 
         if (stencilRenderer != null && stencilRenderer.sharedMaterial != null)
         {
-            simMaterial.SetFloat("_StencilActive", 1f);
-            simMaterial.SetMatrix("_StencilWorldToLocal", stencilRenderer.transform.worldToLocalMatrix);
-            simMaterial.SetTexture("_StencilTex", stencilRenderer.sharedMaterial.GetTexture("_StencilTex"));
-            simMaterial.SetFloat("_TauClear", stencilRenderer.sharedMaterial.GetFloat("_TauClear"));
-            simMaterial.SetFloat("_InkDensity", stencilRenderer.sharedMaterial.GetFloat("_InkDensity"));
+            Material mat = stencilRenderer.sharedMaterial;
+
+            if (!mat.HasProperty("_StencilTex") && stencilDepthShader != null)
+            {
+                mat = new Material(stencilDepthShader) { name = "M_CyanotypeStencil_Runtime" };
+                if (stencilTexture != null)
+                    mat.SetTexture("_StencilTex", stencilTexture);
+                mat.SetColor("_FilmTint", new Color(0.15f, 0.35f, 0.85f, 0.85f));
+                stencilRenderer.sharedMaterial = mat;
+            }
+            else if (stencilTexture != null && mat.GetTexture("_StencilTex") == null)
+            {
+                mat.SetTexture("_StencilTex", stencilTexture);
+            }
+
+            if (mat.HasProperty("_StencilTex"))
+            {
+                simMaterial.SetFloat("_StencilActive", 1f);
+                simMaterial.SetMatrix("_StencilWorldToLocal", stencilRenderer.transform.worldToLocalMatrix);
+                simMaterial.SetTexture("_StencilTex", mat.GetTexture("_StencilTex"));
+                simMaterial.SetFloat("_TauClear", mat.HasProperty("_TauClear") ? mat.GetFloat("_TauClear") : 0.92f);
+                simMaterial.SetFloat("_InkDensity", mat.HasProperty("_InkDensity") ? mat.GetFloat("_InkDensity") : 2.40f);
+            }
+            else
+            {
+                simMaterial.SetFloat("_StencilActive", 0f);
+            }
         }
         else
         {
@@ -466,7 +495,7 @@ public class CyanotypeEnvironmentRig : MonoBehaviour
         if (paperRenderer.sharedMaterial != displayMaterial)
             paperRenderer.sharedMaterial = displayMaterial;
     }
-
+	
     private void ConfigureShadowCamera(Camera cam, RenderTexture target, bool ortho)
     {
         cam.enabled = false;

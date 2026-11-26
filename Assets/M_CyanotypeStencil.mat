@@ -8,7 +8,7 @@ Material:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_Name: M_CyanotypeStencil
-  m_Shader: {fileID: 4800000, guid: a49bbfd6c4c32864faf45de2cead856a, type: 3}
+  m_Shader: {fileID: 4800000, guid: 135211bde48237c4c8888ff2da73616e, type: 3}
   m_Parent: {fileID: 0}
   m_ModifiedSerializedProperties: 0
   m_ValidKeywords: []
@@ -29,10 +29,10 @@ Material:
         m_Offset: {x: 0, y: 0}
     m_Ints: []
     m_Floats:
-    - _InkDensity: 2.4
-    - _IsStencil: 1
+    - _InkDensity: 2.95
+    - _IsStencil: 0
     - _TauClear: 0.92
     m_Colors:
-    - _FilmTint: {r: 0.14999998, g: 0.34999996, b: 0.85, a: 0.65}
+    - _FilmTint: {r: 1, g: 1, b: 1, a: 0.65}
   m_BuildTextureStacks: []
   m_AllowLocking: 1

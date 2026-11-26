@@ -23,10 +23,6 @@ Material:
   m_SavedProperties:
     serializedVersion: 3
     m_TexEnvs:
-    - _ChemState:
-        m_Texture: {fileID: 0}
-        m_Scale: {x: 1, y: 1}
-        m_Offset: {x: 0, y: 0}
     - _PrevFluid:
         m_Texture: {fileID: 0}
         m_Scale: {x: 1, y: 1}
@@ -37,7 +33,7 @@ Material:
     - _BrushMode: 0
     - _BrushRadius: 0.06
     - _BrushStrength: 1.2
-    - _DeltaTime: 0.039881803
+    - _DeltaTime: 0.0499428
     m_Colors:
     - _BrushPos: {r: -1, g: -1, b: 0, a: 0}
     - _PrevBrushPos: {r: -1, g: -1, b: 0, a: 0}

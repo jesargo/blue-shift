@@ -52,7 +52,7 @@ Material:
         m_Scale: {x: 1, y: 1}
         m_Offset: {x: 0, y: 0}
     - _StencilMaskTex:
-        m_Texture: {fileID: 0}
+        m_Texture: {fileID: 2800000, guid: 9d5bd71269f6c5f48a52aac2c4c29f59, type: 3}
         m_Scale: {x: 1, y: 1}
         m_Offset: {x: 0, y: 0}
     - _StencilTex:
@@ -71,17 +71,17 @@ Material:
     m_Floats:
     - _BleachIntensity: 0
     - _CoatingThickness: 0
-    - _DeltaTime: 0.019892404
+    - _DeltaTime: 0.029153196
     - _LampIrradiance: 0
     - _LampRadiusUV: 0.45
     - _StencilInvert: 0
-    - _StencilOpacity: 0
+    - _StencilOpacity: 1
     - _SunIrradiance: 0
     - _TimeScale: 5
     - _TriggerWash: 0
     - _WindowAmbient: 0.08
     m_Colors:
     - _LampCenterUV: {r: 0.5, g: 0.5, b: 0, a: 0}
-    - _StencilBounds: {r: 0, g: 0, b: 0, a: 0}
+    - _StencilBounds: {r: -1.0668299, g: 0.012479186, b: -0.06682992, a: 1.0124795}
   m_BuildTextureStacks: []
   m_AllowLocking: 1

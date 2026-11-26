@@ -34,6 +34,36 @@ public class DraggableShadowProp : MonoBehaviour
         {
             tableY = transform.position.y;
         }
+
+        EnsureSolidShadowColliders();
+    }
+
+    private void EnsureSolidShadowColliders()
+    {
+        // Check if this prop already has at least one non-trigger collider for UV raycasts
+        Collider[] existing = GetComponentsInChildren<Collider>(true);
+        for (int i = 0; i < existing.Length; i++)
+        {
+            if (!existing[i].isTrigger)
+                return;
+        }
+
+        // Otherwise, add solid MeshColliders (or BoxColliders) to child meshes so UV rays hit them
+        MeshFilter[] meshes = GetComponentsInChildren<MeshFilter>(true);
+        for (int i = 0; i < meshes.Length; i++)
+        {
+            if (meshes[i].sharedMesh == null) continue;
+            if (meshes[i].TryGetComponent<Collider>(out var col))
+            {
+                col.isTrigger = false;
+            }
+            else
+            {
+                var mc = meshes[i].gameObject.AddComponent<MeshCollider>();
+                mc.sharedMesh = meshes[i].sharedMesh;
+                mc.convex = true;
+            }
+        }
     }
 
     void Update()

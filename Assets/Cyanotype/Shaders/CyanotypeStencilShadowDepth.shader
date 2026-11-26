@@ -8,11 +8,80 @@ Shader "Cyanotype/StencilShadowDepth"
         _InkDensity ("Max Ink Optical Density", Range(0.5, 4.0)) = 2.40
         _IsStencil ("Is Variable Opacity Stencil", Float) = 0
     }
+
     SubShader
     {
-        Tags { "Queue"="Transparent" "RenderType"="Transparent" }
+        Tags
+        {
+            "RenderPipeline" = "UniversalPipeline"
+            "Queue" = "Transparent"
+            "RenderType" = "Transparent"
+            "IgnoreProjector" = "True"
+        }
 
-        // Pass 0: Visible Scene Rendering (Translucent Blue Acetate Film)
+        // Pass 0: Visible Scene Rendering in URP (Translucent Blue Acetate Film)
+        Pass
+        {
+            Name "ForwardUnlit"
+            Tags { "LightMode" = "UniversalForward" }
+            Blend SrcAlpha OneMinusSrcAlpha
+            ZWrite Off
+            Cull Off
+
+            HLSLPROGRAM
+            #pragma vertex vertVis
+            #pragma fragment fragVis
+            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+
+            TEXTURE2D(_StencilTex);
+            SAMPLER(sampler_StencilTex);
+
+            CBUFFER_START(UnityPerMaterial)
+                float4 _StencilTex_ST;
+                half4 _FilmTint;
+                half _TauClear;
+                half _InkDensity;
+                half _IsStencil;
+            CBUFFER_END
+
+            struct Attributes
+            {
+                float4 positionOS : POSITION;
+                float2 uv : TEXCOORD0;
+            };
+
+            struct Varyings
+            {
+                float4 positionHCS : SV_POSITION;
+                float2 uv : TEXCOORD0;
+            };
+
+            Varyings vertVis(Attributes v)
+            {
+                Varyings o;
+                o.positionHCS = TransformObjectToHClip(v.positionOS.xyz);
+                o.uv = TRANSFORM_TEX(v.uv, _StencilTex);
+                return o;
+            }
+
+            half4 fragVis(Varyings i) : SV_Target
+            {
+                half3 texCol = SAMPLE_TEXTURE2D(_StencilTex, sampler_StencilTex, i.uv).rgb;
+                half lum = dot(texCol, half3(0.299, 0.587, 0.114));
+                // Dark ink regions appear dense/opaque; bright aperture regions appear clear
+                half alpha = lerp(0.92h, 0.25h, lum) * _FilmTint.a;
+                half3 col = lerp(half3(0.03h, 0.05h, 0.12h), _FilmTint.rgb, lum);
+                return half4(col, alpha);
+            }
+            ENDHLSL
+        }
+    }
+
+    // Fallback SubShader for Built-in Render Pipeline (Visible Pass + UVShadowPass)
+    SubShader
+    {
+        Tags { "Queue" = "Transparent" "RenderType" = "Transparent" }
+
         Pass
         {
             Blend SrcAlpha OneMinusSrcAlpha
@@ -20,8 +89,8 @@ Shader "Cyanotype/StencilShadowDepth"
             Cull Off
 
             CGPROGRAM
-            #pragma vertex vertVis
-            #pragma fragment fragVis
+            #pragma vertex vertVisBuiltIn
+            #pragma fragment fragVisBuiltIn
             #include "UnityCG.cginc"
 
             sampler2D _StencilTex;
@@ -40,7 +109,7 @@ Shader "Cyanotype/StencilShadowDepth"
                 float2 uv : TEXCOORD0;
             };
 
-            v2f vertVis(appdata v)
+            v2f vertVisBuiltIn(appdata v)
             {
                 v2f o;
                 o.pos = UnityObjectToClipPos(v.vertex);
@@ -48,10 +117,9 @@ Shader "Cyanotype/StencilShadowDepth"
                 return o;
             }
 
-            float4 fragVis(v2f i) : SV_Target
+            float4 fragVisBuiltIn(v2f i) : SV_Target
             {
                 float lum = dot(tex2D(_StencilTex, i.uv).rgb, float3(0.299, 0.587, 0.114));
-                // Dark ink regions appear dense/opaque; bright aperture regions appear clear
                 float alpha = lerp(0.92, 0.25, lum) * _FilmTint.a;
                 float3 col = lerp(float3(0.03, 0.05, 0.12), _FilmTint.rgb, lum);
                 return float4(col, alpha);
@@ -59,11 +127,10 @@ Shader "Cyanotype/StencilShadowDepth"
             ENDCG
         }
 
-        // Pass 1: UV Shadow Depth & Beer-Lambert Transmittance (Called via RenderWithShader)
         Pass
         {
             Name "UVShadowPass"
-            Tags { "LightMode"="UVShadowPass" }
+            Tags { "LightMode" = "UVShadowPass" }
             Cull Off
             ZWrite On
 
@@ -109,7 +176,7 @@ Shader "Cyanotype/StencilShadowDepth"
                 float dist = length(i.worldPos - _LightPos);
                 float normDepth = saturate((dist - _NearClip) / (_FarClip - _NearClip));
 
-                float transmittance = 0.0; // Solid opaque caster by default
+                float transmittance = 0.0;
                 if (_IsStencil > 0.5)
                 {
                     float lum = dot(tex2D(_StencilTex, i.uv).rgb, float3(0.299, 0.587, 0.114));
@@ -122,10 +189,11 @@ Shader "Cyanotype/StencilShadowDepth"
             ENDCG
         }
     }
-	// Fallback SubShader for standard opaque walls/props when calling RenderWithShader(shader, "")
+
+    // Fallback SubShader for standard opaque walls/props when calling RenderWithShader(shader, "")
     SubShader
     {
-        Tags { "RenderType"="Opaque" }
+        Tags { "RenderType" = "Opaque" }
         Pass
         {
             CGPROGRAM
@@ -152,7 +220,7 @@ Shader "Cyanotype/StencilShadowDepth"
             {
                 float dist = length(i.worldPos - _LightPos);
                 float normDepth = saturate((dist - _NearClip) / (_FarClip - _NearClip));
-                return float2(normDepth, 0.0); // Solid opaque wall/prop
+                return float2(normDepth, 0.0);
             }
             ENDCG
         }

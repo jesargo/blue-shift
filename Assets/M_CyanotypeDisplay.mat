@@ -15,7 +15,7 @@ Material:
   m_InvalidKeywords: []
   m_LightmapFlags: 4
   m_EnableInstancingVariants: 0
-  m_DoubleSidedGI: 0
+  m_DoubleSidedGI: 1
   m_CustomRenderQueue: -1
   stringTagMap: {}
   disabledShaderPasses: []
@@ -47,7 +47,7 @@ Material:
     m_Floats:
     - _BleachIntensity: 0
     - _CoatingThickness: 0
-    - _CoatingWeight: 0
+    - _CoatingWeight: 2
     - _ConcFAC: 20
     - _ConcKFC: 8
     - _DeltaTime: 0.016
@@ -57,7 +57,7 @@ Material:
     - _StencilInvert: 0
     - _StencilOpacity: 0
     - _SunIrradiance: 0
-    - _SunUVIntensity: 1.1432707
+    - _SunUVIntensity: 0
     - _TanninTone: 0
     - _TimeScale: 1
     - _TriggerWash: 0
