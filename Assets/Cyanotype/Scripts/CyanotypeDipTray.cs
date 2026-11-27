@@ -27,11 +27,17 @@ namespace Cyanotype.Gameplay
             return _liquidSurfacePoint != null ? _liquidSurfacePoint.position : transform.position;
         }
 
+        public bool CanAcceptTool(CyanotypePhysicsInteractable tool)
+        {
+            if (tool == null) return false;
+            return _allowCrossRoleRefill || tool.Role == _traySolutionRole;
+        }
+
         public void OnToolDipped(CyanotypePhysicsInteractable tool)
         {
             if (tool == null) return;
 
-            if (!_allowCrossRoleRefill && tool.Role != _traySolutionRole)
+            if (!CanAcceptTool(tool))
             {
                 Debug.LogWarning($"[Cyanotype] {tool.name} ({tool.Role}) dipped into mismatched tray ({_traySolutionRole}).");
                 return;

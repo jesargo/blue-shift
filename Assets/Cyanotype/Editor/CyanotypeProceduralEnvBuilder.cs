@@ -84,7 +84,7 @@ namespace Cyanotype.EditorTools
             var mr = go.AddComponent<MeshRenderer>();
             mr.sharedMaterial = _targetMaterial != null
                 ? _targetMaterial
-                : AssetDatabase.GetBuiltinExtraResource<Material>("Default-Diffuse.mat");
+                : GetOrCreateDefaultMaterial(baseName);
 
             var col = go.AddComponent<MeshCollider>();
             col.sharedMesh = mesh;
@@ -108,6 +108,23 @@ namespace Cyanotype.EditorTools
 
             AssetDatabase.SaveAssets();
             Debug.Log($"[Cyanotype] Built procedural interactable prefab: {prefabPath}");
+        }
+
+        private Material GetOrCreateDefaultMaterial(string baseName)
+        {
+            string matPath = Path.Combine(_outputDir, $"{baseName}_Mat.mat").Replace("\\", "/");
+            Material existing = AssetDatabase.LoadAssetAtPath<Material>(matPath);
+            if (existing != null) return existing;
+
+            Shader shader = Shader.Find("Universal Render Pipeline/Lit") ?? Shader.Find("Standard");
+            Color tint = _archetype == ProceduralArchetype.FieldRock
+                ? new Color(0.45f, 0.44f, 0.41f)
+                : new Color(0.21f, 0.42f, 0.21f);
+
+            var mat = new Material(shader) { color = tint };
+            if (mat.HasProperty("_BaseColor")) mat.SetColor("_BaseColor", tint);
+            AssetDatabase.CreateAsset(mat, matPath);
+            return mat;
         }
 
         private static Mesh GenerateRockMesh(float radius, float roughness, int seed)

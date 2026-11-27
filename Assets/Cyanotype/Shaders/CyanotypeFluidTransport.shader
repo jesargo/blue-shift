@@ -186,7 +186,10 @@ Shader "Cyanotype/FluidTransport"
                         hWater = min(0.22, hWater + deposit * 0.12);
                         sat    = min(1.0, sat + deposit * 0.6);
                         sens   = min(1.0, sens + deposit);
-                        wash   = max(0.0, wash - deposit * 0.9);
+
+                        // Clear leftover wash front on freshly sensitized texels so UV exposure resumes
+                        if (deposit > 0.002)
+                            wash = 0.0;
                     }
                     else if (abs(_BrushMode - 2.0) < 0.2)
                     {

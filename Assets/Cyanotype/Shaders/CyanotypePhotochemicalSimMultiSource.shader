@@ -182,7 +182,7 @@ Shader "Cyanotype/PhotochemicalSimMultiSource"
                     : SoftVis(_SunOccTex, i.uv, _SunPenumbra);
                 float I_sun = _SunUVIntensity * sunCos * sunVis * EvaluateStencilRay(worldPos, -_SunDir, 100.0) * customT;
 
-                // Lamp (inverse-square)
+                // Carbon-Arc Lamp (inverse-square)
                 float3 toLamp   = _LampPos - worldPos;
                 float  lampDist = length(toLamp);
                 float3 L1       = toLamp / max(lampDist, 1e-4);
@@ -195,8 +195,8 @@ Shader "Cyanotype/PhotochemicalSimMultiSource"
                 float I_lamp = _LampUVIntensity * CY_Lambert(worldNorm, L1) * spot * CY_LampFalloff(lampDist)
                     * lampVis * EvaluateStencilRay(worldPos, L1, lampDist) * customT;
 
-                // Diffuse sky through the window
-                float ambVis = useMaps ? 1.0 : tex2Dlod(_SunOccTex, float4(i.uv, 0, 3)).r;
+                // Diffuse sky through the window (mip-blurred _SunOccTex works in both URP and Built-in RP)
+                float ambVis = tex2Dlod(_SunOccTex, float4(i.uv, 0, 3)).r;
                 float I_amb  = _WindowAmbientUV * ambVis * EvaluateStencilRay(worldPos, worldNorm, 100.0) * customT;
 
                 float activeSens = max(0.0, 1.0 - washed);

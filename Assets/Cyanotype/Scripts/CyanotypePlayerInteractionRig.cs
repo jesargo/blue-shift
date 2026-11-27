@@ -61,13 +61,19 @@ namespace Cyanotype.Gameplay
             }
         }
 
+        private void OnDisable()
+        {
+            ReleaseHeldTool(returnToRestPose: true);
+        }
+
         private void Update()
         {
             if (_playerCamera == null) return;
 
-            bool primaryDown = ReadPrimaryPressedThisFrame();
-            bool primaryHeld = ReadPrimaryHeld();
-            bool secondaryDown = ReadSecondaryPressedThisFrame();
+            bool pointerOverHUD = CyanotypeStudioHUD.IsPointerOverHUD;
+            bool primaryDown = !pointerOverHUD && ReadPrimaryPressedThisFrame();
+            bool primaryHeld = !pointerOverHUD && ReadPrimaryHeld();
+            bool secondaryDown = !pointerOverHUD && ReadSecondaryPressedThisFrame();
             bool dipKeyDown = ReadDipKeyPressedThisFrame();
 
             if (_heldTool == null)
@@ -118,7 +124,7 @@ namespace Cyanotype.Gameplay
 
         private void TryPickupTargetTool()
         {
-            Ray ray = CenterScreenRay();
+            Ray ray = ActiveAimRay();
             if (!Physics.Raycast(ray, out RaycastHit hit, _maxReachWorld, _interactableMask, QueryTriggerInteraction.Collide))
                 return;
 
@@ -145,6 +151,8 @@ namespace Cyanotype.Gameplay
             _heldTool.SetHeld(true);
             _isPainting = false;
             _isDipping = false;
+
+            SyncFluidControllerToolFromHeld(_heldTool);
         }
 
         public void ReleaseHeldTool(bool returnToRestPose)
@@ -179,6 +187,29 @@ namespace Cyanotype.Gameplay
 
             _heldTool = null;
             _isDipping = false;
+
+            var fluidCtrl = FindAnyObjectByType<CyanotypeFluidController>();
+            if (fluidCtrl != null)
+            {
+                fluidCtrl.currentTool = CyanotypeFluidController.ToolMode.None;
+            }
+        }
+
+        private static void SyncFluidControllerToolFromHeld(CyanotypePhysicsInteractable tool)
+        {
+            var fluidCtrl = FindAnyObjectByType<CyanotypeFluidController>();
+            if (fluidCtrl == null || tool == null) return;
+
+            fluidCtrl.applicatorShape = tool.ApplicatorShape;
+            fluidCtrl.currentTool = tool.Role switch
+            {
+                CyanotypeToolRole.SensitizerApplicator => CyanotypeFluidController.ToolMode.SensitizerBrush,
+                CyanotypeToolRole.WaterWashApplicator  => CyanotypeFluidController.ToolMode.WaterPourWash,
+                CyanotypeToolRole.AlkaliBleachBath     => CyanotypeFluidController.ToolMode.AlkaliBath,
+                CyanotypeToolRole.TanninTonerBath      => CyanotypeFluidController.ToolMode.TanninBath,
+                CyanotypeToolRole.PeroxideOxidizerBath => CyanotypeFluidController.ToolMode.PeroxideSprayBrush,
+                _ => CyanotypeFluidController.ToolMode.None
+            };
         }
 
         private void BeginTrayDip(CyanotypeDipTray tray)
@@ -195,8 +226,10 @@ namespace Cyanotype.Gameplay
             _dipTimer = _dipDuration;
             _dipWorldTarget = tray.GetDipWorldPoint();
 
-            // Refill bristle/rod wet load and fire the 2D/3D Animator ActionTrigger
-            _heldTool.RefillWetLoad(1f);
+            if (tray.CanAcceptTool(_heldTool))
+            {
+                _heldTool.RefillWetLoad(1f);
+            }
             tray.OnToolDipped(_heldTool);
         }
 
@@ -254,7 +287,7 @@ namespace Cyanotype.Gameplay
 
         private bool TryRaycastPaper(out RaycastHit hit)
         {
-            Ray ray = CenterScreenRay();
+            Ray ray = ActiveAimRay();
             if (!Physics.Raycast(ray, out hit, _maxReachWorld, _paperMask, QueryTriggerInteraction.Collide))
                 return false;
 
@@ -265,7 +298,7 @@ namespace Cyanotype.Gameplay
         private bool TryFindTrayInSight(out CyanotypeDipTray tray)
         {
             tray = null;
-            Ray ray = CenterScreenRay();
+            Ray ray = ActiveAimRay();
             if (!Physics.Raycast(ray, out RaycastHit hit, _maxReachWorld, _trayMask, QueryTriggerInteraction.Collide))
                 return false;
 
@@ -273,9 +306,12 @@ namespace Cyanotype.Gameplay
             return tray != null;
         }
 
-        private Ray CenterScreenRay()
+        private Ray ActiveAimRay()
         {
-            return _playerCamera.ViewportPointToRay(new Vector3(0.5f, 0.5f, 0f));
+            if (Cursor.lockState == CursorLockMode.Locked)
+                return _playerCamera.ViewportPointToRay(new Vector3(0.5f, 0.5f, 0f));
+
+            return _playerCamera.ScreenPointToRay(ReadMouseScreenPos());
         }
 
         private static bool IsLiquidApplicator(CyanotypeToolRole role)
@@ -288,6 +324,15 @@ namespace Cyanotype.Gameplay
         }
 
         // --- Cross-Backend Input Helpers (Legacy Input & New Input System) ---
+
+        private static Vector2 ReadMouseScreenPos()
+        {
+#if ENABLE_INPUT_SYSTEM
+            return Mouse.current != null ? Mouse.current.position.ReadValue() : Vector2.zero;
+#else
+            return Input.mousePosition;
+#endif
+        }
 
         private static bool ReadPrimaryPressedThisFrame()
         {

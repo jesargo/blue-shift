@@ -83,7 +83,7 @@ Material:
     m_Floats:
     - _BleachIntensity: 0
     - _CoatingThickness: 0
-    - _DeltaTime: 0.027552601
+    - _DeltaTime: 0.0668017
     - _LampIrradiance: 0
     - _LampRadiusUV: 0.45
     - _StencilInvert: 0

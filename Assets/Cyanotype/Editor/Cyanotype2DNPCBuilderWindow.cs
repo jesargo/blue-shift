@@ -107,10 +107,11 @@ namespace Cyanotype.EditorTools
             AddAnyTransition(sm, sideState, "ViewDir", AnimatorConditionMode.Equals, 1, false);
             AddAnyTransition(sm, backState, "ViewDir", AnimatorConditionMode.Equals, 2, false);
 
-            var toTalk = frontState.AddTransition(talkState);
-            toTalk.AddCondition(AnimatorConditionMode.If, 0, "IsTalking");
-            toTalk.hasExitTime = false;
-            toTalk.duration = 0.05f;
+            var anyToTalk = sm.AddAnyStateTransition(talkState);
+            anyToTalk.AddCondition(AnimatorConditionMode.If, 0, "IsTalking");
+            anyToTalk.hasExitTime = false;
+            anyToTalk.canTransitionToSelf = false;
+            anyToTalk.duration = 0.05f;
 
             var endTalk = talkState.AddTransition(frontState);
             endTalk.AddCondition(AnimatorConditionMode.IfNot, 0, "IsTalking");
@@ -185,6 +186,7 @@ namespace Cyanotype.EditorTools
             t.AddCondition(mode, threshold, param);
             t.AddCondition(isTalking ? AnimatorConditionMode.If : AnimatorConditionMode.IfNot, 0, "IsTalking");
             t.hasExitTime = false;
+            t.canTransitionToSelf = false;
             t.duration = 0.05f;
         }
     }

@@ -14,11 +14,14 @@ namespace Cyanotype.World
 
         private GameObject _carriedObject;
         private WorldInteractableItem _focusedItem;
+        private CharacterController _playerController;
 
         public WorldInteractableItem FocusedItem => _focusedItem;
+        public bool IsCarryingObject => _carriedObject != null;
 
         private void Awake()
         {
+            _playerController = GetComponentInParent<CharacterController>();
             if (_playerCamera == null) _playerCamera = GetComponentInChildren<Camera>();
             if (_carrySocket == null && _playerCamera != null)
             {
@@ -29,12 +32,20 @@ namespace Cyanotype.World
             }
         }
 
+        private void OnDisable()
+        {
+            _focusedItem = null;
+            DropCarriedObject();
+        }
+
         private void Update()
         {
             if (_playerCamera == null) return;
 
+            bool pointerOverHUD = CyanotypeStudioHUD.IsPointerOverHUD;
+
             // Drop carried rock/object with Right Click
-            if (_carriedObject != null && ReadDropPressed())
+            if (_carriedObject != null && !pointerOverHUD && ReadDropPressed())
             {
                 DropCarriedObject();
                 return;
@@ -50,7 +61,7 @@ namespace Cyanotype.World
                 _focusedItem = null;
             }
 
-            if (_focusedItem != null && ReadInteractPressed())
+            if (_focusedItem != null && !pointerOverHUD && ReadInteractPressed())
             {
                 _focusedItem.Interact(this);
             }
@@ -58,6 +69,7 @@ namespace Cyanotype.World
 
         public void CarryWorldObject(GameObject target)
         {
+            if (target == null) return;
             if (_carriedObject != null) DropCarriedObject();
 
             _carriedObject = target;
@@ -83,6 +95,10 @@ namespace Cyanotype.World
             foreach (var col in _carriedObject.GetComponentsInChildren<Collider>())
             {
                 col.enabled = true;
+                if (_playerController != null)
+                {
+                    Physics.IgnoreCollision(col, _playerController, true);
+                }
             }
             if (_carriedObject.TryGetComponent<Rigidbody>(out var rb))
             {

@@ -32,10 +32,13 @@ namespace Cyanotype.World
         {
             if (worldInteractor == null) return;
 
-            _activePlayerRig = worldInteractor.GetComponent<CyanotypeFirstPersonRigMode>();
-            _activeBenchInteractor = worldInteractor.GetComponent<CyanotypePlayerInteractionRig>();
+            // Drop any carried 3D plant/rock before disabling world interaction
+            worldInteractor.DropCarriedObject();
 
-            if (_snapPlayerToStandPoint && _benchStandPoint != null)
+            _activePlayerRig = worldInteractor.GetComponentInParent<CyanotypeFirstPersonRigMode>();
+            _activeBenchInteractor = worldInteractor.GetComponentInParent<CyanotypePlayerInteractionRig>();
+
+            if (_snapPlayerToStandPoint && _benchStandPoint != null && _activePlayerRig != null)
             {
                 var cc = _activePlayerRig.GetComponent<CharacterController>();
                 if (cc != null) cc.enabled = false;
@@ -67,6 +70,12 @@ namespace Cyanotype.World
             if (_activeBenchInteractor != null && _activeBenchInteractor.IsHoldingTool)
             {
                 _activeBenchInteractor.ReleaseHeldTool(returnToRestPose: true);
+            }
+
+            var fluidCtrl = FindAnyObjectByType<CyanotypeFluidController>();
+            if (fluidCtrl != null)
+            {
+                fluidCtrl.currentTool = CyanotypeFluidController.ToolMode.None;
             }
 
             if (_activePlayerRig != null)

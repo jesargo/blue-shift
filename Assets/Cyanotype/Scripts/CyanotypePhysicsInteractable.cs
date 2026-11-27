@@ -18,6 +18,7 @@ namespace Cyanotype.Gameplay
     {
         [Header("Role & Contact Geometry")]
         [SerializeField] private CyanotypeToolRole _role = CyanotypeToolRole.SensitizerApplicator;
+        [SerializeField] private CyanotypeFluidController.ApplicatorShape _applicatorShape = CyanotypeFluidController.ApplicatorShape.HakeBrush;
         [SerializeField] private Transform _contactTip;
         [SerializeField] private float _contactRadiusWorld = 0.035f;
         [SerializeField] private float _depositionPerTick = 0.18f;
@@ -31,8 +32,12 @@ namespace Cyanotype.Gameplay
         [SerializeField] private float _depletionPerStroke = 0.04f;
 
         private Animator _animator;
+        private CyanotypeFluidController _fluidController;
+        private CyanotypeEnvironmentRig _envRig;
         private bool _isHeld;
+        private bool _isStrokeCommanded;
         private bool _isContactActive;
+        private int _lastAnimEventFrame = -1;
 
         // Cached Animator parameter hashes
         private static readonly int HashIsHeld = Animator.StringToHash("IsHeld");
@@ -40,13 +45,14 @@ namespace Cyanotype.Gameplay
         private static readonly int HashWetLoad = Animator.StringToHash("WetLoad");
         private static readonly int HashActionTrigger = Animator.StringToHash("ActionTrigger");
 
-        // Shader property IDs matching CyanotypeSimMultiSource / CyanotypeEnvironmentRig
+        // Optional global shader uniforms for custom diegetic/VFX shaders
         private static readonly int PropContactUV = Shader.PropertyToID("_BrushContactUV");
         private static readonly int PropContactRadius = Shader.PropertyToID("_BrushContactRadius");
         private static readonly int PropDepositDelta = Shader.PropertyToID("_BrushDepositDelta");
         private static readonly int PropActiveChannel = Shader.PropertyToID("_BrushActiveChannel");
 
         public CyanotypeToolRole Role => _role;
+        public CyanotypeFluidController.ApplicatorShape ApplicatorShape => _applicatorShape;
         public float WetLoad => _wetLoad;
         public float Base10OpticalDensity => _base10OpticalDensity;
 
@@ -54,12 +60,36 @@ namespace Cyanotype.Gameplay
         {
             _animator = GetComponent<Animator>();
             if (_contactTip == null) _contactTip = transform;
+
+            if (_applicatorShape == CyanotypeFluidController.ApplicatorShape.HakeBrush
+                && gameObject.name.IndexOf("rod", System.StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                _applicatorShape = CyanotypeFluidController.ApplicatorShape.GlassCoatingRod;
+            }
         }
+
+        private void Start()
+        {
+            _fluidController = FindAnyObjectByType<CyanotypeFluidController>();
+            _envRig = FindAnyObjectByType<CyanotypeEnvironmentRig>();
+        }
+
+        private bool HasPlayableAnimator =>
+            _animator != null && _animator.isActiveAndEnabled && _animator.runtimeAnimatorController != null;
 
         private void Update()
         {
-            _animator.SetBool(HashIsHeld, _isHeld);
-            _animator.SetFloat(HashWetLoad, _wetLoad);
+            if (HasPlayableAnimator)
+            {
+                _animator.SetBool(HashIsHeld, _isHeld);
+                _animator.SetFloat(HashWetLoad, _wetLoad);
+            }
+
+            // Continuous fallback deposition when held and stroking, even if no AnimationEvent clip is attached
+            if (_isHeld && _isStrokeCommanded && _lastAnimEventFrame != Time.frameCount)
+            {
+                TryApplyPaperPhysics(Time.deltaTime * 6.0f);
+            }
         }
 
         // Called by player interaction controller on pickup / drop
@@ -72,15 +102,23 @@ namespace Cyanotype.Gameplay
         // Called by player primary use button (mouse/trigger)
         public void SetStrokeActive(bool active)
         {
-            _animator.SetBool(HashIsActive, active);
-            if (!active) _isContactActive = false;
+            _isStrokeCommanded = active;
+            if (HasPlayableAnimator)
+                _animator.SetBool(HashIsActive, active);
+
+            if (!active)
+            {
+                _isContactActive = false;
+                Shader.SetGlobalVector(PropDepositDelta, Vector4.zero);
+            }
         }
 
         // Called when dipping brush/rod into a stock solution or bath tray
         public void RefillWetLoad(float amount = 1f)
         {
             _wetLoad = Mathf.Clamp01(_wetLoad + amount);
-            _animator.SetTrigger(HashActionTrigger);
+            if (HasPlayableAnimator)
+                _animator.SetTrigger(HashActionTrigger);
         }
 
         // --- AnimationEvent Callbacks (Injected by CyanotypeHybridAnimBuilderWindow) ---
@@ -88,18 +126,21 @@ namespace Cyanotype.Gameplay
         public void OnPhysicsContactBegin()
         {
             _isContactActive = true;
+            _lastAnimEventFrame = Time.frameCount;
             TryApplyPaperPhysics(0.25f);
         }
 
         public void OnPhysicsDepositTick(float tickWeight)
         {
-            if (!_isContactActive) return;
+            if (!_isContactActive && !_isStrokeCommanded) return;
+            _lastAnimEventFrame = Time.frameCount;
             TryApplyPaperPhysics(tickWeight > 0f ? tickWeight : 1f);
         }
 
         public void OnPhysicsContactEnd()
         {
             _isContactActive = false;
+            _lastAnimEventFrame = Time.frameCount;
             Shader.SetGlobalVector(PropDepositDelta, Vector4.zero);
         }
 
@@ -110,56 +151,78 @@ namespace Cyanotype.Gameplay
 
             if (_wetLoad <= 0.001f) return;
 
-            // Raycast from tool tip onto the cyanotype sheet to find normalized UV
-            Vector3 origin = _contactTip.position + Vector3.up * 0.05f;
-            if (!Physics.Raycast(origin, Vector3.down, out RaycastHit hit, 0.15f, _paperLayerMask))
-                return;
+            if (_fluidController == null)
+                _fluidController = FindAnyObjectByType<CyanotypeFluidController>();
+            if (_envRig == null)
+                _envRig = FindAnyObjectByType<CyanotypeEnvironmentRig>();
 
-            Vector2 uv = hit.textureCoord;
+            // Raycast from tool tip onto the cyanotype sheet
+            Vector3 origin = _contactTip.position + Vector3.up * 0.06f;
+            RaycastHit[] hits = Physics.RaycastAll(origin, Vector3.down, 0.20f, _paperLayerMask, QueryTriggerInteraction.Ignore);
+
+            bool hitPaper = false;
+            Vector2 uv = Vector2.zero;
+            float radiusUV = 0.055f;
+
+            for (int i = 0; i < hits.Length; i++)
+            {
+                var paper = hits[i].collider.GetComponentInParent<DraggableCyanotypePaper>();
+                if (paper != null)
+                {
+                    Transform pt = paper.transform;
+                    Vector3 localHit = pt.InverseTransformPoint(hits[i].point);
+                    uv = new Vector2(Mathf.Clamp01(localHit.x + 0.5f), Mathf.Clamp01(localHit.y + 0.5f));
+                    float minSpan = Mathf.Max(0.1f, Mathf.Min(Mathf.Abs(pt.lossyScale.x), Mathf.Abs(pt.lossyScale.y)));
+                    radiusUV = Mathf.Clamp(_contactRadiusWorld / minSpan, 0.01f, 0.25f);
+                    hitPaper = true;
+                    break;
+                }
+            }
+
+            if (!hitPaper) return;
+
             float amount = _depositionPerTick * weight * _wetLoad;
 
-            // Channel routing matching State 1 / _FluidTex / _BathTex layout:
-            // 0 = Sensitizer (_FluidTex.B) -> locks recipe on first contact
-            // 1 = Water Wash (_FluidTex.R & .A)
-            // 2 = Alkali Bleach (_BathTex.R)
-            // 3 = Tannin Toner (_BathTex.G)
-            // 4 = Peroxide Oxidizer (_BathTex.B)
             int channelIndex = _role switch
             {
                 CyanotypeToolRole.SensitizerApplicator => 0,
-                CyanotypeToolRole.WaterWashApplicator => 1,
-                CyanotypeToolRole.AlkaliBleachBath => 2,
-                CyanotypeToolRole.TanninTonerBath => 3,
+                CyanotypeToolRole.WaterWashApplicator  => 1,
+                CyanotypeToolRole.AlkaliBleachBath     => 2,
+                CyanotypeToolRole.TanninTonerBath      => 3,
                 CyanotypeToolRole.PeroxideOxidizerBath => 4,
                 _ => -1
             };
 
             if (channelIndex < 0) return;
 
-            // Lock the active CyanotypeRecipe on the very first sensitizer stroke
-            // so cFAC and cKFC bake immutably into State 2 (G, B)
             if (channelIndex == 0)
             {
                 LockActiveRecipe();
             }
 
+            // Route stroke into the live fluid/bath render texture simulation
+            if (_fluidController != null)
+            {
+                float strengthScale = Mathf.Clamp(_wetLoad * (_depositionPerTick / 0.18f), 0.15f, 2.5f);
+                _fluidController.SubmitExternalToolStroke(uv, radiusUV, strengthScale, _role, _applicatorShape);
+            }
+
+            // Also publish global shader uniforms for any auxiliary VFX/diegetic shaders
             Shader.SetGlobalVector(PropContactUV, new Vector4(uv.x, uv.y, 0f, 0f));
             Shader.SetGlobalFloat(PropContactRadius, _contactRadiusWorld);
             Shader.SetGlobalInt(PropActiveChannel, channelIndex);
             Shader.SetGlobalVector(PropDepositDelta, new Vector4(amount, 0f, 0f, 0f));
 
-            _wetLoad = Mathf.Clamp01(_wetLoad - _depletionPerStroke * weight);
+            _wetLoad = Mathf.Clamp01(_wetLoad - _depletionPerStroke * weight * 0.25f);
         }
 
         private void LockActiveRecipe()
         {
-            // Uses SendMessageUpwards/Broadcast so it integrates cleanly with CyanotypeEnvironmentRig
-            // without tight coupling if rig lives on a parent studio root.
-            var rig = FindFirstObjectByType<MonoBehaviour>();
-            if (rig != null)
-            {
-                gameObject.SendMessage("OnFirstSensitizerStroke", SendMessageOptions.DontRequireReceiver);
-            }
+            if (_envRig == null)
+                _envRig = FindAnyObjectByType<CyanotypeEnvironmentRig>();
+
+            if (_envRig != null && _envRig.recipe != null)
+                _envRig.recipe.locked = true;
         }
 
 #if UNITY_EDITOR

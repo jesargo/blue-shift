@@ -1,4 +1,6 @@
 #if UNITY_EDITOR
+using System;
+using System.Linq;
 using UnityEngine;
 using UnityEditor;
 
@@ -60,7 +62,7 @@ public class CyanotypeStudioBuilder : EditorWindow
         MeshFilter paperMF = paperGO.GetComponent<MeshFilter>();
         MeshRenderer paperMR = paperGO.GetComponent<MeshRenderer>();
 
-        Shader simShader     = Shader.Find("Cyanotype/PhotochemicalSimMultiSource");
+        Shader simShader     = Shader.Find("Cyanotype/SimMultiSource") ?? Shader.Find("Cyanotype/PhotochemicalSimMultiSource");
         Shader displayShader = Shader.Find("Cyanotype/SurfaceDisplay");
         Shader fluidShader   = Shader.Find("Cyanotype/FluidTransport");
         Shader bathShader    = Shader.Find("Cyanotype/BathTransport");
@@ -126,7 +128,7 @@ public class CyanotypeStudioBuilder : EditorWindow
         uvSpot.color = new Color(0.55f, 0.30f, 1.0f);
         uvSpot.shadows = LightShadows.None;
 
-        Light sunLight = FindFirstObjectByType<Light>();
+        Light sunLight = FindAnyObjectByType<Light>();
         if (sunLight == null || sunLight.type != LightType.Directional)
         {
             GameObject sunGO = new GameObject("Sun_DirectionalLight");
@@ -141,7 +143,9 @@ public class CyanotypeStudioBuilder : EditorWindow
         GameObject rigGO = new GameObject("Cyanotype_StudioRig");
         Undo.RegisterCreatedObjectUndo(rigGO, "Create Cyanotype Studio Rig");
 
+        CyanotypeRecipe recipe = new CyanotypeRecipe();
         CyanotypeEnvironmentRig envRig = rigGO.AddComponent<CyanotypeEnvironmentRig>();
+        envRig.recipe = recipe;
         envRig.paperMeshFilter = paperMF;
         envRig.paperRenderer = paperMR;
         envRig.shadowCasterLayers = 1 << 0;
@@ -193,10 +197,13 @@ public class CyanotypeStudioBuilder : EditorWindow
             camGO.tag = "MainCamera";
             mainCam = camGO.AddComponent<Camera>();
         }
+        mainCam.transform.SetParent(null, true);
         mainCam.transform.position = new Vector3(0.0f, 1.55f, -2.35f);
         mainCam.transform.rotation = Quaternion.Euler(48f, 0f, 0f);
         mainCam.nearClipPlane = 0.05f;
 
+        TryAddComponentByName(mainCam.gameObject, "CyanotypeInputSystemCameraRig");
+        TryAddComponentByName(mainCam.gameObject, "CyanotypeInputSystemPlayerController");
         if (mainCam.GetComponent<CyanotypePlayerController>() == null)
             mainCam.gameObject.AddComponent<CyanotypePlayerController>();
 
@@ -252,6 +259,22 @@ public class CyanotypeStudioBuilder : EditorWindow
         }
     }
 
+    private static void TryAddComponentByName(GameObject target, string typeName)
+    {
+        Type found = AppDomain.CurrentDomain.GetAssemblies()
+            .SelectMany(a =>
+            {
+                try { return a.GetTypes(); }
+                catch { return Array.Empty<Type>(); }
+            })
+            .FirstOrDefault(t => t.Name == typeName && typeof(Component).IsAssignableFrom(t));
+
+        if (found != null && target.GetComponent(found) == null)
+        {
+            Undo.AddComponent(target, found);
+        }
+    }
+
     private static void EnsureDirectories()
     {
         if (!AssetDatabase.IsValidFolder("Assets/Cyanotype"))
@@ -289,7 +312,7 @@ public class CyanotypeStudioBuilder : EditorWindow
         if (!keepCollider)
         {
             var col = go.GetComponent<Collider>();
-            if (col != null) Object.DestroyImmediate(col);
+            if (col != null) UnityEngine.Object.DestroyImmediate(col);
         }
         return go;
     }

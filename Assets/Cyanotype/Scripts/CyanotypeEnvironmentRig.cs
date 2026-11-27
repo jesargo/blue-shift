@@ -44,7 +44,7 @@ public class CyanotypeEnvironmentRig : MonoBehaviour
     public Transform windowOpening;
     [Range(0f, 0.5f)] public float windowAmbientUV = 0.08f;
 
-    [Header("Indoor Arc / UV Lamp Settings")]
+    [Header("Indoor Carbon-Arc Lamp Settings")]
     public Light uvLampLight;
     public Camera lampShadowCam;
     public bool lampIsOn = true;
@@ -65,6 +65,8 @@ public class CyanotypeEnvironmentRig : MonoBehaviour
     private RenderTexture _stateB;
     private RenderTexture _state2A;
     private RenderTexture _state2B;
+    private RenderTexture _state3A;
+    private RenderTexture _state3B;
     private Texture2D _objPosTex;
     private Texture2D _objNormTex;
     private Texture2D _sunOccTex;
@@ -75,18 +77,20 @@ public class CyanotypeEnvironmentRig : MonoBehaviour
     private float _normalSign = 1f;
     private bool _washed;
     private bool _pauseCycle = true;
-	private RenderTexture _state3A;
-	private RenderTexture _state3B;
-	public RenderTexture State3RT => _state3A;
+
     public RenderTexture State1RT => _stateA;
     public RenderTexture State2RT => _state2A;
-	public void ResetFullSheet()
+    public RenderTexture State3RT => _state3A;
+    public bool IsDebugWashed => _washed;
+
+    public void ResetFullSheet()
     {
         ClearChemicalState();
-        var fluidCtrl = FindFirstObjectByType<CyanotypeFluidController>();
+        var fluidCtrl = FindAnyObjectByType<CyanotypeFluidController>();
         if (fluidCtrl != null)
             fluidCtrl.ResetFluid();
     }
+
     void Start()
     {
         Physics.queriesHitBackfaces = true;
@@ -111,8 +115,9 @@ public class CyanotypeEnvironmentRig : MonoBehaviour
         _stateB       = CreateRT(1024, 1024, 0,  RenderTextureFormat.ARGBFloat);
         _state2A      = CreateRT(1024, 1024, 0,  RenderTextureFormat.ARGBFloat);
         _state2B      = CreateRT(1024, 1024, 0,  RenderTextureFormat.ARGBFloat);
-		_state3A = CreateRT(1024, 1024, 0, RenderTextureFormat.ARGBFloat);
-		_state3B = CreateRT(1024, 1024, 0, RenderTextureFormat.ARGBFloat);
+        _state3A      = CreateRT(1024, 1024, 0,  RenderTextureFormat.ARGBFloat);
+        _state3B      = CreateRT(1024, 1024, 0,  RenderTextureFormat.ARGBFloat);
+
         InitOcclusionMaps();
         FitStencilToA4Aspect();
         BakeObjectSpaceGeometry();
@@ -120,6 +125,33 @@ public class CyanotypeEnvironmentRig : MonoBehaviour
 
         if (sunShadowCam != null) ConfigureShadowCamera(sunShadowCam, _sunShadowRT, true);
         if (lampShadowCam != null) ConfigureShadowCamera(lampShadowCam, _lampShadowRT, false);
+    }
+
+    private void OnDestroy()
+    {
+        ReleaseRT(ref _sunShadowRT);
+        ReleaseRT(ref _lampShadowRT);
+        ReleaseRT(ref _stateA);
+        ReleaseRT(ref _stateB);
+        ReleaseRT(ref _state2A);
+        ReleaseRT(ref _state2B);
+        ReleaseRT(ref _state3A);
+        ReleaseRT(ref _state3B);
+
+        if (_objPosTex != null) Destroy(_objPosTex);
+        if (_objNormTex != null) Destroy(_objNormTex);
+        if (_sunOccTex != null) Destroy(_sunOccTex);
+        if (_lampOccTex != null) Destroy(_lampOccTex);
+    }
+
+    private static void ReleaseRT(ref RenderTexture rt)
+    {
+        if (rt != null)
+        {
+            rt.Release();
+            Destroy(rt);
+            rt = null;
+        }
     }
 
     private void OnValidate()
@@ -169,8 +201,8 @@ public class CyanotypeEnvironmentRig : MonoBehaviour
         ClearRT(_stateB,  new Color(0f, initCoat, 0f, 0f));
         ClearRT(_state2A, new Color(0f, recipe.facGramsPer100mL, recipe.kfcGramsPer100mL, 0f));
         ClearRT(_state2B, new Color(0f, recipe.facGramsPer100mL, recipe.kfcGramsPer100mL, 0f));
-		ClearRT(_state3A, Color.clear);
-		ClearRT(_state3B, Color.clear);
+        ClearRT(_state3A, Color.clear);
+        ClearRT(_state3B, Color.clear);
     }
 
     private void ClearRT(RenderTexture rt, Color clearColor)
@@ -462,7 +494,12 @@ public class CyanotypeEnvironmentRig : MonoBehaviour
 
         // Sync custom PNG/texture stencil prop if present
         CyanotypeStencilProp activeStencil = null;
-        foreach (var st in FindObjectsByType<CyanotypeStencilProp>(FindObjectsSortMode.None))
+#if UNITY_6000_3_OR_NEWER
+        var stencils = FindObjectsByType<CyanotypeStencilProp>();
+#else
+        var stencils = FindObjectsByType<CyanotypeStencilProp>(FindObjectsSortMode.None);
+#endif
+        foreach (var st in stencils)
         {
             if (st.isActiveAndEnabled && st.stencilMaskTexture != null)
             {
@@ -512,6 +549,9 @@ public class CyanotypeEnvironmentRig : MonoBehaviour
                 mat.SetTexture("_StencilTex", stencilTexture);
             }
 
+            if (mat.HasProperty("_IsStencilFilm"))
+                mat.SetFloat("_IsStencilFilm", 1f);
+
             if (mat.HasProperty("_StencilTex"))
             {
                 simMaterial.SetFloat("_StencilActive", 1f);
@@ -546,36 +586,27 @@ public class CyanotypeEnvironmentRig : MonoBehaviour
         simMaterial.SetFloat("_BathTimeScale", bathTimeScale);
         simMaterial.SetFloat("_DebugQuickWash", _washed ? 1f : 0f);
 
-        // Pass 0: State 1 (UV dose, coat, bleach dose, wash)
-        simMaterial.SetTexture("_PrevState", _stateA);
+        // Bind consistent pre-step states for all 3 passes
+        simMaterial.SetTexture("_PrevState",  _stateA);
         simMaterial.SetTexture("_PrevState2", _state2A);
-        Graphics.Blit(_stateA, _stateB, simMaterial, 0);
+        simMaterial.SetTexture("_PrevState3", _state3A);
 
+        // Pass 0: State 1 (UV dose, coat, bleach dose, wash)
+        Graphics.Blit(_stateA,  _stateB,  simMaterial, 0);
         // Pass 1: State 2 (toned sites, baked recipe, oxidation)
         Graphics.Blit(_state2A, _state2B, simMaterial, 1);
+        // Pass 2: State 3 (committed base-10 OD of bleached & recoated underlayers)
+        Graphics.Blit(_state3A, _state3B, simMaterial, 2);
 
-        (_stateA, _stateB)   = (_stateB, _stateA);
+        (_stateA,  _stateB)  = (_stateB,  _stateA);
         (_state2A, _state2B) = (_state2B, _state2A);
+        (_state3A, _state3B) = (_state3B, _state3A);
 
-        displayMaterial.SetTexture("_ChemStateTex", _stateA);
+        displayMaterial.SetTexture("_ChemStateTex",  _stateA);
         displayMaterial.SetTexture("_ChemStateTex2", _state2A);
+        displayMaterial.SetTexture("_ChemStateTex3", _state3A);
         if (paperRenderer.sharedMaterial != displayMaterial)
             paperRenderer.sharedMaterial = displayMaterial;
-		simMaterial.SetTexture("_PrevState",  _stateA);
-		simMaterial.SetTexture("_PrevState2", _state2A);
-		simMaterial.SetTexture("_PrevState3", _state3A);
-
-		Graphics.Blit(_stateA,  _stateB,  simMaterial, 0);
-		Graphics.Blit(_state2A, _state2B, simMaterial, 1);
-		Graphics.Blit(_state3A, _state3B, simMaterial, 2);
-
-		(_stateA,  _stateB)  = (_stateB,  _stateA);
-		(_state2A, _state2B) = (_state2B, _state2A);
-		(_state3A, _state3B) = (_state3B, _state3A);
-
-		displayMaterial.SetTexture("_ChemStateTex",  _stateA);
-		displayMaterial.SetTexture("_ChemStateTex2", _state2A);
-		displayMaterial.SetTexture("_ChemStateTex3", _state3A);
     }
 
     private void ConfigureShadowCamera(Camera cam, RenderTexture target, bool ortho)
@@ -658,7 +689,7 @@ public class CyanotypeEnvironmentRig : MonoBehaviour
         simMaterial.SetTexture("_ObjPosTex", _objPosTex);
         simMaterial.SetTexture("_ObjNormTex", _objNormTex);
     }
-	
+
     private void HandleInput()
     {
         bool toggleLamp = false;
@@ -672,14 +703,14 @@ public class CyanotypeEnvironmentRig : MonoBehaviour
         {
             toggleLamp = kb.lKey.wasPressedThisFrame;
             pauseSun   = kb.pKey.wasPressedThisFrame;
-            washPrint  = kb.spaceKey.wasPressedThisFrame;
+            washPrint  = kb.kKey.wasPressedThisFrame;
             resetPaper = kb.backspaceKey.wasPressedThisFrame;
         }
 #endif
 #if ENABLE_LEGACY_INPUT_MANAGER
         toggleLamp |= Input.GetKeyDown(KeyCode.L);
         pauseSun   |= Input.GetKeyDown(KeyCode.P);
-        washPrint  |= Input.GetKeyDown(KeyCode.Space);
+        washPrint  |= Input.GetKeyDown(KeyCode.K);
         resetPaper |= Input.GetKeyDown(KeyCode.Backspace);
 #endif
 
@@ -688,7 +719,7 @@ public class CyanotypeEnvironmentRig : MonoBehaviour
         if (washPrint)
         {
             _washed = true;
-            Debug.Log("[Cyanotype] Debug quick-wash triggered.");
+            Debug.Log("[Cyanotype] Debug quick-wash triggered (Key K).");
         }
         if (resetPaper)
         {

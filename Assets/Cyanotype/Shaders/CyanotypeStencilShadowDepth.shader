@@ -6,6 +6,7 @@ Shader "Cyanotype/StencilShadowDepth"
         _FilmTint ("Film Base Tint", Color) = (0.15, 0.35, 0.85, 0.85)
         _TauClear ("Clear Film Transmittance", Range(0.5, 1.0)) = 0.92
         _InkDensity ("Ink Base-10 Optical Density", Range(0.0, 3.0)) = 1.05
+        _IsStencilFilm ("Is Stencil Film (1=Film, 0=Opaque Blocker)", Float) = 0.0
     }
     SubShader
     {
@@ -40,6 +41,7 @@ Shader "Cyanotype/StencilShadowDepth"
             float4 _FilmTint;
             float _TauClear;
             float _InkDensity;
+            float _IsStencilFilm;
             float3 _LightPos;
             float _NearClip;
             float _FarClip;
@@ -64,7 +66,9 @@ Shader "Cyanotype/StencilShadowDepth"
                 {
                     float dist  = length(i.worldPos - _LightPos);
                     float depth = saturate((dist - _NearClip) / max(_FarClip - _NearClip, 1e-4));
-                    float tau   = CY_InkTau(_TauClear, _InkDensity, inkMask);
+                    float tau   = (_IsStencilFilm > 0.5)
+                        ? CY_InkTau(_TauClear, _InkDensity, inkMask)
+                        : 0.0;
                     return float4(depth, tau, 0.0, 1.0);
                 }
 

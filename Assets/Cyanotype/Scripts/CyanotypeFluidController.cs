@@ -24,16 +24,25 @@ public class CyanotypeFluidController : MonoBehaviour
         Peroxide = 3
     }
 
-    [Header("References")]
+    public enum ApplicatorShape
+    {
+        HakeBrush = 0,
+        GlassCoatingRod = 1
+    }
 
+    [Header("References")]
     public CyanotypeEnvironmentRig rig;
     public Material fluidMaterial;
     public Material bathMaterial;
     public Transform paperTransform;
-	public bool hasBeenBleached { get; private set; }
+
+    public bool hasBeenWashed { get; private set; }
+    public bool hasBeenBleached { get; private set; }
+
     [Header("Fluid & Bath Tool Settings")]
     public ToolMode currentTool = ToolMode.SensitizerBrush;
     public BathTrayMode activeBathTray = BathTrayMode.None;
+    public ApplicatorShape applicatorShape = ApplicatorShape.HakeBrush;
     [Range(0.01f, 0.2f)] public float brushRadius = 0.05f;
     [Range(0.06f, 0.35f)] public float sprayRadius = 0.16f;
     [Range(0.2f, 3.0f)] public float flowStrength = 1.2f;
@@ -45,6 +54,14 @@ public class CyanotypeFluidController : MonoBehaviour
     private RenderTexture _bathB;
     private Vector2 _prevBrushUV = new Vector2(-1f, -1f);
     private Camera _cam;
+
+    // External 3D tool stroke buffer (populated by CyanotypePhysicsInteractable)
+    private bool _hasExternalStroke;
+    private Vector2 _extBrushUV = new Vector2(-1f, -1f);
+    private float _extBrushRadius = 0.05f;
+    private float _extFlowStrength = 1.2f;
+    private ToolMode _extToolMode = ToolMode.None;
+    private ApplicatorShape _extApplicatorShape = ApplicatorShape.HakeBrush;
 
     public RenderTexture FluidRT => _fluidA;
     public RenderTexture BathRT  => _bathA;
@@ -113,6 +130,24 @@ public class CyanotypeFluidController : MonoBehaviour
         }
     }
 
+    private void OnDestroy()
+    {
+        ReleaseRT(ref _fluidA);
+        ReleaseRT(ref _fluidB);
+        ReleaseRT(ref _bathA);
+        ReleaseRT(ref _bathB);
+    }
+
+    private static void ReleaseRT(ref RenderTexture rt)
+    {
+        if (rt != null)
+        {
+            rt.Release();
+            Destroy(rt);
+            rt = null;
+        }
+    }
+
     private RenderTexture CreateFluidRT(int w, int h)
     {
         var rt = new RenderTexture(w, h, 0, RenderTextureFormat.ARGBFloat);
@@ -128,11 +163,13 @@ public class CyanotypeFluidController : MonoBehaviour
         ClearRT(_fluidB, Color.clear);
         ClearRT(_bathA,  Color.clear);
         ClearRT(_bathB,  Color.clear);
-        activeBathTray  = BathTrayMode.None;
-        hasBeenBleached = false;
-        _prevBrushUV    = new Vector2(-1f, -1f);
+        activeBathTray     = BathTrayMode.None;
+        hasBeenWashed      = false;
+        hasBeenBleached    = false;
+        _hasExternalStroke = false;
+        _prevBrushUV       = new Vector2(-1f, -1f);
     }
-	
+
     private void ClearRT(RenderTexture rt, Color col)
     {
         if (rt == null) return;
@@ -142,10 +179,45 @@ public class CyanotypeFluidController : MonoBehaviour
         RenderTexture.active = prev;
     }
 
+    /// <summary>
+    /// Receives physical brush/rod contact strokes from CyanotypePhysicsInteractable tools.
+    /// </summary>
+    public void SubmitExternalToolStroke(
+        Vector2 uv,
+        float radiusUV,
+        float strengthScale,
+        Cyanotype.Gameplay.CyanotypeToolRole role,
+        ApplicatorShape shape)
+    {
+        ToolMode mapped = role switch
+        {
+            Cyanotype.Gameplay.CyanotypeToolRole.SensitizerApplicator => ToolMode.SensitizerBrush,
+            Cyanotype.Gameplay.CyanotypeToolRole.WaterWashApplicator  => ToolMode.WaterPourWash,
+            Cyanotype.Gameplay.CyanotypeToolRole.AlkaliBleachBath     => ToolMode.AlkaliBath,
+            Cyanotype.Gameplay.CyanotypeToolRole.TanninTonerBath      => ToolMode.TanninBath,
+            Cyanotype.Gameplay.CyanotypeToolRole.PeroxideOxidizerBath => ToolMode.PeroxideSprayBrush,
+            _ => ToolMode.None
+        };
+
+        if (mapped == ToolMode.None) return;
+
+        _hasExternalStroke   = true;
+        _extBrushUV          = uv;
+        _extBrushRadius      = radiusUV;
+        _extFlowStrength     = flowStrength * strengthScale;
+        _extToolMode         = mapped;
+        _extApplicatorShape  = shape;
+        currentTool          = mapped;
+        applicatorShape      = shape;
+    }
+
     void Update()
     {
         if (fluidMaterial == null || paperTransform == null || rig == null) return;
         if (_cam == null || !_cam.isActiveAndEnabled) _cam = FindActiveCamera();
+
+        if (rig.IsDebugWashed && rig.recipe != null && rig.recipe.locked)
+            hasBeenWashed = true;
 
         HandleToolHotkeys();
         StepFluidAndBathSimulation();
@@ -163,8 +235,6 @@ public class CyanotypeFluidController : MonoBehaviour
         }
         return null;
     }
-
-    
 
     private void HandleToolHotkeys()
     {
@@ -196,12 +266,35 @@ public class CyanotypeFluidController : MonoBehaviour
     {
         Vector2 brushUV = new Vector2(-1f, -1f);
         float activeMode = 0f;
+        float effectiveRadius = brushRadius;
+        float effectiveStrength = flowStrength;
+        ApplicatorShape effectiveShape = applicatorShape;
 
-        if (currentTool == ToolMode.SubmergeTrayWash)
+        var fpRigMode = FindAnyObjectByType<Cyanotype.World.CyanotypeFirstPersonRigMode>();
+        bool inExplorationMode = fpRigMode != null
+            && fpRigMode.CurrentMode == Cyanotype.World.PlayerPresentationMode.ExplorationFullBody;
+
+        var interactionRig = FindAnyObjectByType<Cyanotype.Gameplay.CyanotypePlayerInteractionRig>();
+        bool holding3DTool = interactionRig != null && interactionRig.isActiveAndEnabled && interactionRig.IsHoldingTool;
+
+        if (_hasExternalStroke)
+        {
+            brushUV           = _extBrushUV;
+            activeMode        = (float)_extToolMode;
+            effectiveRadius   = _extBrushRadius;
+            effectiveStrength = _extFlowStrength;
+            effectiveShape    = _extApplicatorShape;
+            ApplyToolSideEffects(_extToolMode);
+            _hasExternalStroke = false;
+        }
+        else if (currentTool == ToolMode.SubmergeTrayWash)
         {
             activeMode = 3f;
+            if (rig != null && rig.recipe != null && rig.recipe.locked)
+                hasBeenWashed = true;
         }
-        else if (currentTool != ToolMode.None && IsPrimaryButtonHeld() && !CyanotypeStudioHUD.IsPointerOverHUD && _cam != null)
+        else if (!inExplorationMode && !holding3DTool && currentTool != ToolMode.None
+            && IsPrimaryButtonHeld() && !CyanotypeStudioHUD.IsPointerOverHUD && _cam != null)
         {
             Vector2 screenPos = Cursor.lockState == CursorLockMode.Locked
                 ? new Vector2(Screen.width * 0.5f, Screen.height * 0.5f)
@@ -220,16 +313,7 @@ public class CyanotypeFluidController : MonoBehaviour
                         Mathf.Clamp01(localHit.y + 0.5f)
                     );
                     activeMode = (float)currentTool;
-
-                    if (currentTool == ToolMode.SensitizerBrush && rig != null && rig.recipe != null)
-                    {
-                        rig.recipe.locked = true;
-                        hasBeenBleached   = false;
-                    }
-                    else if (currentTool == ToolMode.AlkaliBath)
-                    {
-                        UnlockForRecoat();
-                    }
+                    ApplyToolSideEffects(currentTool);
                     break;
                 }
             }
@@ -245,9 +329,10 @@ public class CyanotypeFluidController : MonoBehaviour
         fluidMaterial.SetTexture("_PrevFluid", _fluidA);
         fluidMaterial.SetVector("_BrushPos", brushUV);
         fluidMaterial.SetVector("_PrevBrushPos", _prevBrushUV);
-        fluidMaterial.SetFloat("_BrushRadius", brushRadius);
-        fluidMaterial.SetFloat("_BrushStrength", flowStrength);
+        fluidMaterial.SetFloat("_BrushRadius", effectiveRadius);
+        fluidMaterial.SetFloat("_BrushStrength", effectiveStrength);
         fluidMaterial.SetFloat("_BrushMode", fluidMode);
+        fluidMaterial.SetFloat("_ApplicatorShape", (float)effectiveShape);
         fluidMaterial.SetFloat("_DeltaTime", Time.deltaTime);
 
         Graphics.Blit(_fluidA, _fluidB, fluidMaterial);
@@ -261,16 +346,18 @@ public class CyanotypeFluidController : MonoBehaviour
             bathMaterial.SetTexture("_FluidTex", _fluidA);
             bathMaterial.SetVector("_BrushPos", brushUV);
             bathMaterial.SetVector("_PrevBrushPos", _prevBrushUV);
-            bathMaterial.SetFloat("_BrushRadius", brushRadius);
+            bathMaterial.SetFloat("_BrushRadius", effectiveRadius);
             bathMaterial.SetFloat("_SprayRadius", sprayRadius);
-            bathMaterial.SetFloat("_BrushStrength", flowStrength);
+            bathMaterial.SetFloat("_BrushStrength", effectiveStrength);
             bathMaterial.SetFloat("_BathMode", bathBrushMode);
             bathMaterial.SetFloat("_SubmergeBath", (float)activeBathTray);
             bathMaterial.SetFloat("_DeltaTime", Time.deltaTime);
-			if (activeBathTray == BathTrayMode.Alkali)
+
+            if (activeBathTray == BathTrayMode.Alkali)
             {
                 UnlockForRecoat();
             }
+
             Graphics.Blit(_bathA, _bathB, bathMaterial);
             (_bathA, _bathB) = (_bathB, _bathA);
         }
@@ -289,8 +376,30 @@ public class CyanotypeFluidController : MonoBehaviour
             rig.displayMaterial.SetTexture("_BathTex", _bathA);
         }
     }
-	private void UnlockForRecoat()
+
+    private void ApplyToolSideEffects(ToolMode mode)
     {
+        if (mode == ToolMode.SensitizerBrush && rig != null && rig.recipe != null)
+        {
+            rig.recipe.locked = true;
+            hasBeenWashed   = false;
+            hasBeenBleached = false;
+        }
+        else if (mode == ToolMode.WaterPourWash && rig != null && rig.recipe != null && rig.recipe.locked)
+        {
+            hasBeenWashed = true;
+        }
+        else if (mode == ToolMode.AlkaliBath)
+        {
+            UnlockForRecoat();
+        }
+    }
+
+    private void UnlockForRecoat()
+    {
+        // Alkali bleach only reacts on washed prints (washed > 0.35 in shader)
+        if (!hasBeenWashed) return;
+
         if (!hasBeenBleached)
         {
             hasBeenBleached = true;
@@ -300,6 +409,7 @@ public class CyanotypeFluidController : MonoBehaviour
             }
         }
     }
+
     private static bool IsPrimaryButtonHeld()
     {
 #if ENABLE_INPUT_SYSTEM

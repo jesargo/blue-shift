@@ -35,11 +35,20 @@ public class CyanotypeStudioHUD : MonoBehaviour
 
     void Start()
     {
-        if (rig == null)             rig             = GetComponent<CyanotypeEnvironmentRig>()  ?? FindFirstObjectByType<CyanotypeEnvironmentRig>();
-        if (fluidController == null) fluidController = GetComponent<CyanotypeFluidController>() ?? FindFirstObjectByType<CyanotypeFluidController>();
-        if (applicatorTools == null) applicatorTools = GetComponent<CyanotypeApplicatorTools>() ?? FindFirstObjectByType<CyanotypeApplicatorTools>();
-        if (envToggle == null)       envToggle       = GetComponent<StudioEnvironmentToggle>()  ?? FindFirstObjectByType<StudioEnvironmentToggle>();
-        if (draggablePaper == null)  draggablePaper  = FindFirstObjectByType<DraggableCyanotypePaper>();
+        if (rig == null)             rig             = GetComponent<CyanotypeEnvironmentRig>()  ?? FindAnyObjectByType<CyanotypeEnvironmentRig>();
+        if (fluidController == null) fluidController = GetComponent<CyanotypeFluidController>() ?? FindAnyObjectByType<CyanotypeFluidController>();
+        if (applicatorTools == null) applicatorTools = GetComponent<CyanotypeApplicatorTools>() ?? FindAnyObjectByType<CyanotypeApplicatorTools>();
+        if (envToggle == null)       envToggle       = GetComponent<StudioEnvironmentToggle>()  ?? FindAnyObjectByType<StudioEnvironmentToggle>();
+        if (draggablePaper == null)  draggablePaper  = FindAnyObjectByType<DraggableCyanotypePaper>();
+    }
+
+    private void OnDestroy()
+    {
+        if (_bgTex != null)        Destroy(_bgTex);
+        if (_btnTex != null)       Destroy(_btnTex);
+        if (_btnActiveTex != null) Destroy(_btnActiveTex);
+        if (_lockTex != null)      Destroy(_lockTex);
+        if (_openTex != null)      Destroy(_openTex);
     }
 
     void Update()
@@ -148,8 +157,8 @@ public class CyanotypeStudioHUD : MonoBehaviour
         float virtualW = Screen.width / scale;
         float virtualH = Screen.height / scale;
 
-        Rect leftRect  = new Rect(14f, 14f, 320f, Mathf.Min(virtualH - 28f, 675f));
-        Rect rightRect = new Rect(virtualW - 324f, 14f, 310f, Mathf.Min(virtualH - 28f, 540f));
+        Rect leftRect  = new Rect(14f, 14f, 320f, Mathf.Min(virtualH - 28f, 710f));
+        Rect rightRect = new Rect(virtualW - 324f, 14f, 310f, Mathf.Min(virtualH - 28f, 575f));
 
         Vector2 mouseGui = Event.current.mousePosition;
         IsPointerOverHUD = leftRect.Contains(mouseGui) || rightRect.Contains(mouseGui);
@@ -171,7 +180,29 @@ public class CyanotypeStudioHUD : MonoBehaviour
         {
             GUILayout.Label("1. Active Tool (Keys 0 - 6)", _labelStyle);
             DrawToolButton("[0] Move Paper & Props",       CyanotypeFluidController.ToolMode.None);
-            DrawToolButton("[1] Sensitizer Brush",         CyanotypeFluidController.ToolMode.SensitizerBrush);
+            DrawToolButton("[1] Sensitizer Coat",          CyanotypeFluidController.ToolMode.SensitizerBrush);
+
+            if (fluidController.currentTool == CyanotypeFluidController.ToolMode.SensitizerBrush)
+            {
+                bool isRod = fluidController.applicatorShape == CyanotypeFluidController.ApplicatorShape.GlassCoatingRod;
+                string appLabel = isRod
+                    ? "[B] Applicator: Glass Coating Rod"
+                    : "[B] Applicator: 1900s Hake Brush";
+                if (GUILayout.Button(appLabel, _activeButtonStyle, GUILayout.Height(26f)))
+                {
+                    if (applicatorTools != null)
+                    {
+                        applicatorTools.ToggleApplicator();
+                    }
+                    else
+                    {
+                        fluidController.applicatorShape = isRod
+                            ? CyanotypeFluidController.ApplicatorShape.HakeBrush
+                            : CyanotypeFluidController.ApplicatorShape.GlassCoatingRod;
+                    }
+                }
+            }
+
             DrawToolButton("[2] Water Pour Wash",          CyanotypeFluidController.ToolMode.WaterPourWash);
             DrawToolButton("[3] Submerge in Water Tray",   CyanotypeFluidController.ToolMode.SubmergeTrayWash);
             DrawToolButton("[4] Alkali Bleach (Soda Ash)", CyanotypeFluidController.ToolMode.AlkaliBath);
@@ -209,8 +240,6 @@ public class CyanotypeStudioHUD : MonoBehaviour
             {
                 GUILayout.Label("UNLOCKED (Editable Before Coating)", _badgeOpenStyle, GUILayout.Height(24f));
             }
-            
-            
 
             GUI.enabled = !rig.recipe.locked;
             GUILayout.Label($"FAC (Ferric Ammonium Citrate): {rig.recipe.facGramsPer100mL:F1} g", _labelStyle);
@@ -268,14 +297,14 @@ public class CyanotypeStudioHUD : MonoBehaviour
             rig.ResetFullSheet();
 
         GUILayout.Space(10f);
-        GUILayout.Label("CONTROLS (UNIFIED)", _headerStyle);
+        GUILayout.Label("CONTROLS", _headerStyle);
         GUILayout.Label(
-            "• WASD / Arrows: Move Camera\n" +
-            "• Hold Right-Click: Look Around\n" +
-            "• Middle-Drag / Wheel: Pan & Zoom\n" +
-            "• Tab: Toggle Free-Look | R: Reset View\n" +
+            "• WASD / Arrows: Move | Shift: Sprint | Space: Jump\n" +
+            "• Hold Left Alt: Unlock Cursor for HUD Sliders\n" +
+            "• Keys 0–6: Select Tool | B: Brush / Glass Rod\n" +
+            "• E: Dip Held Tool in Tray | Tab / Esc: Exit Bench\n" +
             "• Prop Selected: Q/E Height, Z/X Rotate\n" +
-            "• Space: Debug Quick-Wash",
+            "• K: Debug Quick-Wash",
             _keyHintStyle
         );
 

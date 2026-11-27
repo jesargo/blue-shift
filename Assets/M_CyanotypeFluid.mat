@@ -35,9 +35,9 @@ Material:
     m_Floats:
     - _ApplicatorShape: 0
     - _BrushMode: 0
-    - _BrushRadius: 0.06
+    - _BrushRadius: 0.055
     - _BrushStrength: 1.2
-    - _DeltaTime: 0.027552601
+    - _DeltaTime: 0.0668017
     m_Colors:
     - _BrushPos: {r: -1, g: -1, b: 0, a: 0}
     - _PrevBrushPos: {r: -1, g: -1, b: 0, a: 0}

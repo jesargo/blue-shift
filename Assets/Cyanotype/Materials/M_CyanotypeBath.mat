@@ -34,9 +34,9 @@ Material:
     m_Ints: []
     m_Floats:
     - _BathMode: 0
-    - _BrushRadius: 0.06
+    - _BrushRadius: 0.07
     - _BrushStrength: 1.2
-    - _DeltaTime: 0.026593998
+    - _DeltaTime: 0.026173802
     - _SprayRadius: 0.16
     - _SubmergeBath: 0
     m_Colors:

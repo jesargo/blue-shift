@@ -77,12 +77,12 @@ namespace Cyanotype.EditorTools
             int undoGroup = Undo.GetCurrentGroup();
 
             // 1. Lighting & Base Studio Controllers
-            EnsureDirectionalSunLight();
+            Light sunLight = EnsureDirectionalSunLight();
             GameObject studioRoot = BuildStudioAndEnvironmentRoot();
 
             // 2. 1900s Cyanotype Workbench (0.89m paper, hake brush, glass rod, trays, carbon-arc lamp)
             Vector3 benchCenter = new Vector3(0f, 0f, 2.2f);
-            CyanotypeWorkbenchStation workbench = BuildCyanotypeWorkbench(studioRoot.transform, benchCenter);
+            BuildCyanotypeWorkbench(studioRoot, benchCenter, sunLight);
 
             // 3. First-Person 3D Player Rig (ExplorationFullBody <-> ActiveCyanotypeArmsOnly)
             GameObject playerRoot = BuildFirstPersonPlayerRig(new Vector3(0f, 0f, 0.6f));
@@ -119,6 +119,7 @@ namespace Cyanotype.EditorTools
             Undo.RegisterCreatedObjectUndo(root, "Create Cyanotype Environment");
 
             // Attach core base-project controllers if present in assembly
+            TryAddComponentByName(root, "CyanotypeRecipe");
             TryAddComponentByName(root, "CyanotypeEnvironmentRig");
             TryAddComponentByName(root, "CyanotypeFluidController");
             TryAddComponentByName(root, "StudioEnvironmentToggle");
@@ -133,9 +134,13 @@ namespace Cyanotype.EditorTools
             return root;
         }
 
-        private static void EnsureDirectionalSunLight()
+        private static Light EnsureDirectionalSunLight()
         {
+#if UNITY_6000_3_OR_NEWER
+            var lights = FindObjectsByType<Light>();
+#else
             var lights = FindObjectsByType<Light>(FindObjectsSortMode.None);
+#endif
             Light sun = lights.FirstOrDefault(l => l.type == LightType.Directional);
             if (sun == null)
             {
@@ -148,6 +153,7 @@ namespace Cyanotype.EditorTools
             sun.transform.rotation = Quaternion.Euler(52f, -32f, 0f);
             sun.intensity = 1.25f;
             sun.shadows = LightShadows.Soft;
+            return sun;
         }
 
         // -------------------------------------------------------------------------
@@ -168,7 +174,9 @@ namespace Cyanotype.EditorTools
             cc.radius = 0.32f;
             cc.center = new Vector3(0f, 0.875f, 0f);
 
-            // Attach existing base player/camera scripts if compiled in project
+            // Attach New Input System drivers + base legacy drivers (auto-disabled if New Input System active)
+            TryAddComponentByName(playerRoot, "CyanotypeInputSystemCameraRig");
+            TryAddComponentByName(playerRoot, "CyanotypeInputSystemPlayerController");
             TryAddComponentByName(playerRoot, "CyanotypePlayerController");
             TryAddComponentByName(playerRoot, "CyanotypeCameraRig");
 
@@ -208,10 +216,11 @@ namespace Cyanotype.EditorTools
                     out armRenderers);
             }
 
-            // Attach World & Workbench Interactors
+            // Attach World & Workbench Interactors + Prompt HUD
             var worldInteractor = playerRoot.AddComponent<CyanotypeWorldInteractor>();
             var benchInteractor = playerRoot.AddComponent<CyanotypePlayerInteractionRig>();
             var rigMode = playerRoot.AddComponent<CyanotypeFirstPersonRigMode>();
+            TryAddComponentByName(playerRoot, "CyanotypeWorldPromptHUD");
 
             // Wire private [SerializeField] arrays on CyanotypeFirstPersonRigMode via SerializedObject
             var so = new SerializedObject(rigMode);
@@ -245,8 +254,10 @@ namespace Cyanotype.EditorTools
             headMesh.transform.SetParent(headPivot.transform, false);
             headMesh.transform.localScale = new Vector3(0.21f, 0.24f, 0.23f);
             DestroyImmediate(headMesh.GetComponent<Collider>());
-            ApplyTintMaterial(headMesh.GetComponent<Renderer>(), skinColor);
-            headRenderers = new[] { headMesh.GetComponent<Renderer>() };
+            var headRend = headMesh.GetComponent<Renderer>();
+            headRend.shadowCastingMode = ShadowCastingMode.ShadowsOnly;
+            ApplyTintMaterial(headRend, skinColor);
+            headRenderers = new[] { headRend };
 
             // Torso & Legs group (visible in ExplorationFullBody, hidden in ActiveCyanotypeArmsOnly)
             var bodyGroup = new GameObject("Body_TorsoAndLegs");
@@ -336,11 +347,18 @@ namespace Cyanotype.EditorTools
             {
                 string n = r.name.ToLowerInvariant();
                 if (n.Contains("head") || n.Contains("hair") || n.Contains("hat") || n.Contains("face"))
+                {
+                    r.shadowCastingMode = ShadowCastingMode.ShadowsOnly;
                     hList.Add(r);
+                }
                 else if (n.Contains("arm") || n.Contains("hand") || n.Contains("sleeve") || n.Contains("glove"))
+                {
                     aList.Add(r);
+                }
                 else
+                {
                     bList.Add(r);
+                }
             }
 
             head = hList.ToArray();
@@ -351,10 +369,10 @@ namespace Cyanotype.EditorTools
         // -------------------------------------------------------------------------
         // 3. 1900s Studio Workbench (0.89m Sheet, Tools, 5 Trays, Carbon-Arc Lamp)
         // -------------------------------------------------------------------------
-        private CyanotypeWorkbenchStation BuildCyanotypeWorkbench(Transform parent, Vector3 benchCenter)
+        private CyanotypeWorkbenchStation BuildCyanotypeWorkbench(GameObject studioRoot, Vector3 benchCenter, Light sunLight)
         {
             var benchRoot = new GameObject("Cyanotype_StudioWorkbench");
-            benchRoot.transform.SetParent(parent, false);
+            benchRoot.transform.SetParent(studioRoot.transform, false);
             benchRoot.transform.position = benchCenter;
 
             // Wooden table top (height = 0.80m)
@@ -379,9 +397,6 @@ namespace Cyanotype.EditorTools
 
             var benchInteractable = tableTop.AddComponent<WorldInteractableItem>();
             benchInteractable.ConfigureProcedural(WorldInteractableKind.CyanotypeWorkbench, "Use Cyanotype Workbench", false);
-            var benchSO = new SerializedObject(benchInteractable);
-            var unityEventProp = benchSO.FindProperty("_onInteracted");
-            benchSO.ApplyModifiedPropertiesWithoutUndo();
 
             // Register persistent UnityEvent listener -> CyanotypeWorkbenchStation.EnterWorkbench
             var field = typeof(WorldInteractableItem).GetField("_onInteracted",
@@ -400,8 +415,27 @@ namespace Cyanotype.EditorTools
             sheet.transform.localPosition = new Vector3(-0.15f, tableSurfaceY, 0.02f);
             sheet.transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
             sheet.transform.localScale = new Vector3(SheetWidthWorld, SheetHeightWorld, 1f);
-            ApplyTintMaterial(sheet.GetComponent<Renderer>(), new Color(0.93f, 0.92f, 0.87f));
-            TryAddComponentByName(sheet, "DraggableCyanotypePaper");
+
+            MeshFilter paperMF = sheet.GetComponent<MeshFilter>();
+            MeshRenderer paperMR = sheet.GetComponent<MeshRenderer>();
+
+            EnsureMaterialsDirectory();
+            Shader simShader = Shader.Find("Cyanotype/SimMultiSource") ?? Shader.Find("Cyanotype/PhotochemicalSimMultiSource");
+            Shader displayShader = Shader.Find("Cyanotype/SurfaceDisplay");
+            Shader fluidShader = Shader.Find("Cyanotype/FluidTransport");
+            Shader bathShader = Shader.Find("Cyanotype/BathTransport");
+
+            Material simMat = CreateAssetMaterial(simShader, "Assets/Cyanotype/Materials/M_CyanotypeSim.mat");
+            Material displayMat = CreateAssetMaterial(displayShader, "Assets/Cyanotype/Materials/M_CyanotypeDisplay.mat");
+            Material fluidMat = CreateAssetMaterial(fluidShader, "Assets/Cyanotype/Materials/M_CyanotypeFluid.mat");
+            Material bathMat = CreateAssetMaterial(bathShader, "Assets/Cyanotype/Materials/M_CyanotypeBath.mat");
+
+            if (displayMat != null)
+                paperMR.sharedMaterial = displayMat;
+            else
+                ApplyTintMaterial(paperMR, new Color(0.93f, 0.92f, 0.87f));
+
+            Component dragPaper = TryAddComponentByName(sheet, "DraggableCyanotypePaper");
 
             // 2. Period-Accurate 1900s Tools: Hake Brush & Glass Coating Rod
             Build1900sApplicatorTool(
@@ -437,6 +471,7 @@ namespace Cyanotype.EditorTools
             TryAddComponentByName(stencil, "CyanotypeStencilProp");
 
             // 4. Five Studio Trays (Sensitizer, Water Wash, Alkali Soda Ash, Tannin Toner, Peroxide)
+            Component fluidCtrl = GetComponentByName(studioRoot, "CyanotypeFluidController");
             var trayConfigs = new (string name, CyanotypeToolRole role, Color liquidColor, float zOffset)[]
             {
                 ("Tray_SensitizerStock", CyanotypeToolRole.SensitizerApplicator, new Color(0.74f, 0.82f, 0.22f), -0.44f),
@@ -448,7 +483,7 @@ namespace Cyanotype.EditorTools
 
             foreach (var cfg in trayConfigs)
             {
-                BuildStudioTray(benchRoot.transform, cfg.name, new Vector3(0.62f, tableSurfaceY, cfg.zOffset), cfg.role, cfg.liquidColor);
+                BuildStudioTray(benchRoot.transform, cfg.name, new Vector3(0.62f, tableSurfaceY, cfg.zOffset), cfg.role, cfg.liquidColor, fluidCtrl);
             }
 
             // 5. 1900s Carbon-Arc Lamp normalized at 0.50m above sheet
@@ -471,6 +506,36 @@ namespace Cyanotype.EditorTools
             arcLight.intensity = 2.4f;
             arcLight.color = new Color(0.84f, 0.90f, 1.0f);
             arcLight.shadows = LightShadows.Soft;
+
+            // 6. Wire CyanotypeEnvironmentRig, CyanotypeFluidController & StudioEnvironmentToggle
+            Component envRig = GetComponentByName(studioRoot, "CyanotypeEnvironmentRig");
+            Component recipeComp = GetComponentByName(studioRoot, "CyanotypeRecipe");
+            Component envToggle = GetComponentByName(studioRoot, "StudioEnvironmentToggle");
+
+            AssignFieldIfPresent(envRig, "paperMeshFilter", paperMF);
+            AssignFieldIfPresent(envRig, "paperRenderer", paperMR);
+            AssignFieldIfPresent(envRig, "shadowCasterLayers", 1 << 0);
+            AssignFieldIfPresent(envRig, "sunLight", sunLight);
+            AssignFieldIfPresent(envRig, "uvLampLight", arcLight);
+            AssignFieldIfPresent(envRig, "lampIsOn", true);
+            AssignFieldIfPresent(envRig, "lampUVIntensity", 2.6f);
+            AssignFieldIfPresent(envRig, "lampSize", 0.08f);
+            AssignFieldIfPresent(envRig, "sunPenumbra", 0.0047f);
+            AssignFieldIfPresent(envRig, "peakSunUVIntensity", 1.2f);
+            AssignFieldIfPresent(envRig, "windowAmbientUV", 0.03f);
+            AssignFieldIfPresent(envRig, "coatingThickness", 0.0f);
+            AssignFieldIfPresent(envRig, "simMaterial", simMat);
+            AssignFieldIfPresent(envRig, "displayMaterial", displayMat);
+            AssignFieldIfPresent(envRig, "recipe", recipeComp);
+
+            AssignFieldIfPresent(fluidCtrl, "rig", envRig);
+            AssignFieldIfPresent(fluidCtrl, "paperTransform", sheet.transform);
+            AssignFieldIfPresent(fluidCtrl, "fluidMaterial", fluidMat);
+            AssignFieldIfPresent(fluidCtrl, "bathMaterial", bathMat);
+
+            AssignFieldIfPresent(envToggle, "rig", envRig);
+            AssignFieldIfPresent(dragPaper, "fluidController", fluidCtrl);
+            AssignFieldIfPresent(dragPaper, "restingY", sheet.transform.position.y);
 
             return station;
         }
@@ -509,6 +574,7 @@ namespace Cyanotype.EditorTools
 
             var interactable = tool.AddComponent<CyanotypePhysicsInteractable>();
             interactable.ConfigureFromEditor(role, radiusWorld, depositPerTick, 0f);
+            TryAddComponentByName(tool, "CyanotypeDiegeticUXBinder");
 
             var so = new SerializedObject(interactable);
             so.FindProperty("_contactTip").objectReferenceValue = tip.transform;
@@ -520,7 +586,8 @@ namespace Cyanotype.EditorTools
             string name,
             Vector3 localPos,
             CyanotypeToolRole role,
-            Color liquidColor)
+            Color liquidColor,
+            Component fluidCtrl)
         {
             var tray = GameObject.CreatePrimitive(PrimitiveType.Cube);
             tray.name = name;
@@ -546,7 +613,8 @@ namespace Cyanotype.EditorTools
 
             if (role == CyanotypeToolRole.WaterWashApplicator)
             {
-                TryAddComponentByName(tray, "WaterTrayTrigger");
+                Component waterTrigger = TryAddComponentByName(tray, "WaterTrayTrigger");
+                AssignFieldIfPresent(waterTrigger, "fluidController", fluidCtrl);
             }
             TryAddComponentByName(tray, "CyanotypePropTray");
         }
@@ -561,7 +629,6 @@ namespace Cyanotype.EditorTools
 
             UnityEngine.Random.InitState(_worldSeed);
 
-            // Shared procedural plant & rock meshes
             Mesh plantMesh = BuildProceduralFernMesh();
             Mesh rockMesh = BuildProceduralRockMesh();
 
@@ -748,19 +815,67 @@ namespace Cyanotype.EditorTools
         // -------------------------------------------------------------------------
         // Helpers
         // -------------------------------------------------------------------------
-        private static void TryAddComponentByName(GameObject target, string typeName)
+        private static void EnsureMaterialsDirectory()
         {
-            Type found = AppDomain.CurrentDomain.GetAssemblies()
+            if (!AssetDatabase.IsValidFolder("Assets/Cyanotype"))
+                AssetDatabase.CreateFolder("Assets", "Cyanotype");
+            if (!AssetDatabase.IsValidFolder("Assets/Cyanotype/Materials"))
+                AssetDatabase.CreateFolder("Assets/Cyanotype", "Materials");
+        }
+
+        private static Material CreateAssetMaterial(Shader shader, string path)
+        {
+            if (shader == null) return null;
+
+            Material existing = AssetDatabase.LoadAssetAtPath<Material>(path);
+            if (existing != null)
+            {
+                existing.shader = shader;
+                EditorUtility.SetDirty(existing);
+                return existing;
+            }
+
+            Material mat = new Material(shader);
+            AssetDatabase.CreateAsset(mat, path);
+            return mat;
+        }
+
+        private static Type ResolveType(string typeName)
+        {
+            return AppDomain.CurrentDomain.GetAssemblies()
                 .SelectMany(a =>
                 {
                     try { return a.GetTypes(); }
                     catch { return Array.Empty<Type>(); }
                 })
-                .FirstOrDefault(t => t.Name == typeName && typeof(Component).IsAssignableFrom(t));
+                .FirstOrDefault(t => t.Name == typeName);
+        }
 
-            if (found != null && target.GetComponent(found) == null)
+        private static Component TryAddComponentByName(GameObject target, string typeName)
+        {
+            Type found = ResolveType(typeName);
+            if (found != null && typeof(Component).IsAssignableFrom(found))
             {
-                Undo.AddComponent(target, found);
+                return target.GetComponent(found) ?? Undo.AddComponent(target, found);
+            }
+            return null;
+        }
+
+        private static Component GetComponentByName(GameObject target, string typeName)
+        {
+            Type found = ResolveType(typeName);
+            return found != null ? target.GetComponent(found) : null;
+        }
+
+        private static void AssignFieldIfPresent(Component target, string fieldName, object value)
+        {
+            if (target == null || value == null) return;
+            var field = target.GetType().GetField(fieldName,
+                System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            if (field != null && field.FieldType.IsInstanceOfType(value))
+            {
+                field.SetValue(target, value);
+                EditorUtility.SetDirty(target);
             }
         }
 
@@ -779,6 +894,7 @@ namespace Cyanotype.EditorTools
             if (r == null) return;
             Shader shader = Shader.Find("Universal Render Pipeline/Lit") ?? Shader.Find("Standard");
             var mat = new Material(shader) { color = color };
+            if (mat.HasProperty("_BaseColor")) mat.SetColor("_BaseColor", color);
             r.sharedMaterial = mat;
         }
     }

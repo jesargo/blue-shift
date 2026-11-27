@@ -16,7 +16,7 @@ namespace Cyanotype.EditorTools
         [MenuItem("Cyanotype/Build World & Screen Prompt UI")]
         public static void BuildPromptUI()
         {
-            var interactor = Object.FindFirstObjectByType<CyanotypeWorldInteractor>();
+            var interactor = Object.FindAnyObjectByType<CyanotypeWorldInteractor>();
             if (interactor == null)
             {
                 EditorUtility.DisplayDialog(

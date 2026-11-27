@@ -42,6 +42,7 @@ namespace Cyanotype.World
         private float _benchAnchorYaw;
         private bool _wasInBenchMode;
         private bool _cursorLocked = true;
+        private bool _hasStudioChildren;
 
         private void Awake()
         {
@@ -53,10 +54,29 @@ namespace Cyanotype.World
                 if (cam != null) _cameraTransform = cam.transform;
             }
 
-            _targetYaw = _currentYaw = transform.eulerAngles.y;
+            var childBehaviours = GetComponentsInChildren<MonoBehaviour>(true);
+            for (int i = 0; i < childBehaviours.Length; i++)
+            {
+                var b = childBehaviours[i];
+                if (b == null) continue;
+                string typeName = b.GetType().Name;
+                if (typeName == "CyanotypeWorkbenchStation" || typeName == "CyanotypeDipTray")
+                {
+                    _hasStudioChildren = true;
+                    break;
+                }
+            }
+
+            bool singleObjectCamera = (_cameraTransform == null || _cameraTransform == transform);
+            _targetYaw = _currentYaw = singleObjectCamera
+                ? (_cameraTransform != null ? _cameraTransform.eulerAngles.y : transform.eulerAngles.y)
+                : transform.eulerAngles.y;
+
             if (_cameraTransform != null)
             {
-                float initialPitch = _cameraTransform.localEulerAngles.x;
+                float initialPitch = singleObjectCamera
+                    ? _cameraTransform.eulerAngles.x
+                    : _cameraTransform.localEulerAngles.x;
                 if (initialPitch > 180f) initialPitch -= 360f;
                 _targetPitch = _currentPitch = initialPitch;
             }
@@ -153,8 +173,16 @@ namespace Cyanotype.World
             _currentYaw = Mathf.LerpAngle(_currentYaw, _targetYaw, t);
             _currentPitch = Mathf.Lerp(_currentPitch, _targetPitch, t);
 
-            transform.rotation = Quaternion.Euler(0f, _currentYaw, 0f);
-            _cameraTransform.localRotation = Quaternion.Euler(_currentPitch, 0f, 0f);
+            // Rotate the camera transform directly if attached to the camera or a shared container holding studio meshes.
+            if (_cameraTransform == transform || _hasStudioChildren)
+            {
+                _cameraTransform.rotation = Quaternion.Euler(_currentPitch, _currentYaw, 0f);
+            }
+            else
+            {
+                transform.rotation = Quaternion.Euler(0f, _currentYaw, 0f);
+                _cameraTransform.localRotation = Quaternion.Euler(_currentPitch, 0f, 0f);
+            }
 #endif
         }
 

@@ -1,5 +1,7 @@
 #if UNITY_EDITOR
+using System;
 using System.IO;
+using System.Linq;
 using UnityEditor;
 using UnityEditor.Animations;
 using UnityEngine;
@@ -109,7 +111,7 @@ namespace Cyanotype.EditorTools
                 rb.isKinematic = (_role != CyanotypeToolRole.ShadowOrStencilProp);
             }
 
-            // 3. Attach runtime physics bridge (non-destructive alongside existing scripts)
+            // 3. Attach runtime physics bridge & diegetic UX binder (non-destructive)
             var interactable = _sourceObject.GetComponent<CyanotypePhysicsInteractable>();
             if (interactable == null) interactable = Undo.AddComponent<CyanotypePhysicsInteractable>(_sourceObject);
 
@@ -119,6 +121,15 @@ namespace Cyanotype.EditorTools
                 _depositionRatePerTick,
                 _base10OpticalDensity
             );
+
+            if (_role == CyanotypeToolRole.ShadowOrStencilProp)
+            {
+                TryAddComponentByName(_sourceObject, "DraggableShadowProp");
+            }
+            else
+            {
+                TryAddComponentByName(_sourceObject, "CyanotypeDiegeticUXBinder");
+            }
 
             // 4. Save clean Prefab asset
             if (!AssetDatabase.IsValidFolder(_prefabOutputDir))
@@ -130,6 +141,22 @@ namespace Cyanotype.EditorTools
             string prefabPath = Path.Combine(_prefabOutputDir, $"{_sourceObject.name}_Interactable.prefab").Replace("\\", "/");
             PrefabUtility.SaveAsPrefabAssetAndConnect(_sourceObject, prefabPath, InteractionMode.UserAction);
             Debug.Log($"[Cyanotype] Saved physics interactable prefab: {prefabPath}");
+        }
+
+        private static void TryAddComponentByName(GameObject target, string typeName)
+        {
+            Type found = AppDomain.CurrentDomain.GetAssemblies()
+                .SelectMany(a =>
+                {
+                    try { return a.GetTypes(); }
+                    catch { return Array.Empty<Type>(); }
+                })
+                .FirstOrDefault(t => t.Name == typeName && typeof(Component).IsAssignableFrom(t));
+
+            if (found != null && target.GetComponent(found) == null)
+            {
+                Undo.AddComponent(target, found);
+            }
         }
     }
 }
